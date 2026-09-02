@@ -160,7 +160,8 @@
 
     var BALL_RADIUS = 13;
     var ball = null;
-    var ballTimer = 300;
+    var ITEM_SPAWN_INTERVAL = 3000; // 50s at 60fps
+    var ballTimer = ITEM_SPAWN_INTERVAL;
 
     var SHOCKWAVE_MAX_RADIUS = 213;
     var SHOCKWAVE_GROW_SPEED = 6.3;
@@ -168,11 +169,11 @@
 
     var RAINBOW_RADIUS = 14;
     var rainbowBall = null;
-    var rainbowTimer = 1800;
+    var rainbowTimer = ITEM_SPAWN_INTERVAL;
 
     var FIRE_RADIUS = 12;
     var fireBall = null;
-    var fireTimer = 1200;
+    var fireTimer = ITEM_SPAWN_INTERVAL;
 
     var TRAIL_LIFE = 36;
     var trailParticles = [];
@@ -296,12 +297,12 @@
       enemyBullets = [];
       particles = [];
       ball = null;
-      ballTimer = 300;
+      ballTimer = ITEM_SPAWN_INTERVAL;
       shockwaves = [];
       rainbowBall = null;
-      rainbowTimer = 1800 + Math.random() * 1800;
+      rainbowTimer = ITEM_SPAWN_INTERVAL;
       fireBall = null;
-      fireTimer = 1200 + Math.random() * 1200;
+      fireTimer = ITEM_SPAWN_INTERVAL;
       trailParticles = [];
       powerupTimer = 0;
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
@@ -525,7 +526,7 @@
         rainbowTimer--;
         if (rainbowTimer <= 0) {
           spawnRainbowBall();
-          rainbowTimer = 1800 + Math.random() * 1800;
+          rainbowTimer = ITEM_SPAWN_INTERVAL;
         }
       } else {
         rainbowBall.x += rainbowBall.vx;
@@ -542,7 +543,7 @@
         fireTimer--;
         if (fireTimer <= 0) {
           spawnFire();
-          fireTimer = 1200 + Math.random() * 1200;
+          fireTimer = ITEM_SPAWN_INTERVAL;
         }
       } else {
         fireBall.x += fireBall.vx;
@@ -563,7 +564,7 @@
         ballTimer--;
         if (ballTimer <= 0) {
           spawnBall();
-          ballTimer = 600 + Math.random() * 600;
+          ballTimer = ITEM_SPAWN_INTERVAL;
         }
       } else {
         ball.x += ball.vx;
