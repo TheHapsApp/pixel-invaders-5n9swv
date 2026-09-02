@@ -434,6 +434,7 @@
         for (var i = 0; i < t.splitCount; i++) {
           var offsetX = (i - (t.splitCount - 1) / 2) * (inv.w * 0.4);
           var child = makeInvader(t.next, inv.x + inv.w / 2 - (8 * TIERS[t.next].cell) / 2 + offsetX, inv.y, Math.floor(Math.random() * SPRITES.length));
+          child.x = Math.max(6, Math.min(CANVAS_W - 6 - child.w, child.x)); // keep it inside the formation's safe zone
           child.spawnGrace = 20; // briefly immune so a piercing bullet doesn't insta-kill its own children
           invaders.push(child);
         }
@@ -564,6 +565,7 @@
         for (var i = 0; i < 2; i++) {
           var offsetX = (i - 0.5) * (inv.w * 0.4);
           var child = makeInvader(0, inv.x + inv.w / 2 - (8 * miniT.cell) / 2 + offsetX, inv.y, Math.floor(Math.random() * SPRITES.length));
+          child.x = Math.max(6, Math.min(CANVAS_W - 6 - child.w, child.x)); // keep it inside the formation's safe zone
           child.spawnGrace = 20; // briefly immune so the same beam pass doesn't insta-kill its own children
           invaders.push(child);
         }
