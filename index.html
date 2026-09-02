@@ -462,7 +462,7 @@
     }
 
     function triggerMegaExplosion(x, y) {
-      shockwaves.push({ x: x, y: y, radius: 10, maxRadius: 950, grow: 16 });
+      shockwaves.push({ x: x, y: y, radius: 10, maxRadius: 950, grow: 16, decorative: true });
       killAllInvaders();
       rainbowBall = null;
       playExplosionSound(true);
@@ -649,12 +649,14 @@
         var swGrow = sw.grow || SHOCKWAVE_GROW_SPEED;
         var swMax = sw.maxRadius || SHOCKWAVE_MAX_RADIUS;
         sw.radius += swGrow;
-        for (var k = invaders.length - 1; k >= 0; k--) {
-          var inv2 = invaders[k];
-          var icx = inv2.x + inv2.w / 2, icy = inv2.y + inv2.h / 2;
-          var dx2 = icx - sw.x, dy2 = icy - sw.y;
-          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= sw.radius) {
-            killInvader(inv2, k, true);
+        if (!sw.decorative) {
+          for (var k = invaders.length - 1; k >= 0; k--) {
+            var inv2 = invaders[k];
+            var icx = inv2.x + inv2.w / 2, icy = inv2.y + inv2.h / 2;
+            var dx2 = icx - sw.x, dy2 = icy - sw.y;
+            if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= sw.radius) {
+              killInvader(inv2, k, true);
+            }
           }
         }
         if (sw.radius >= swMax) shockwaves.splice(i, 1);
