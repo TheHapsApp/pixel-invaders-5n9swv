@@ -243,9 +243,11 @@
     var SUPER_BULLET_SPEED = 12;
 
     var beamCharged = false;
-    var BEAM_W = 16;
-    var BEAM_H = 3 * (8 * TIERS[2].cell);
-    var BEAM_SPEED = 14;
+    var PREVIEW_H = 46; // little charged indicator that sits on the ship's tip
+
+    var sweepBeam = null; // the fired beam: a vertical line that sweeps left to right
+    var SWEEP_THICKNESS = 18;
+    var SWEEP_SPEED = 9;
 
     var score = 0, lives = 3, wave = 1;
     var state = "idle"; // idle | playing | gameover
@@ -399,6 +401,7 @@
       blueTimer = ITEM_SPAWN_INTERVAL;
       blueDelay = 240;
       beamCharged = false;
+      sweepBeam = null;
       trailParticles = [];
       powerupTimer = 0;
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
@@ -440,11 +443,7 @@
 
     function firePlayerBullet() {
       if (beamCharged) {
-        playerBullets.push({
-          x: player.x + PLAYER_W / 2 - BEAM_W / 2,
-          y: player.y - BEAM_H,
-          w: BEAM_W, h: BEAM_H, mini: true
-        });
+        sweepBeam = { x: 0, speed: SWEEP_SPEED };
         beamCharged = false;
       } else if (powerupTimer > 0) {
         playerBullets.push({
@@ -636,11 +635,10 @@
         }
       }
 
-      // player bullets (super + beam bullets pierce through everything instead of stopping)
+      // player bullets (super bullets pierce through everything instead of stopping)
       for (i = playerBullets.length - 1; i >= 0; i--) {
         var pb = playerBullets[i];
-        var pierces = pb.super || pb.mini;
-        pb.y -= pb.super ? SUPER_BULLET_SPEED : (pb.mini ? BEAM_SPEED : 10);
+        pb.y -= pb.super ? SUPER_BULLET_SPEED : 10;
         if (pb.y + pb.h < 0) {
           playerBullets.splice(i, 1);
           continue;
@@ -663,16 +661,15 @@
           activateBeam();
           consumed = true;
         }
-        if (consumed && !pierces) {
+        if (consumed && !pb.super) {
           playerBullets.splice(i, 1);
           continue;
         }
 
         for (var j = invaders.length - 1; j >= 0; j--) {
           if (!(invaders[j].spawnGrace > 0) && rectsOverlap(pb, invaders[j])) {
-            if (pb.mini) { killInvaderToMini(invaders[j], j); }
-            else { killInvader(invaders[j], j, !!pb.super); }
-            if (!pierces) { playerBullets.splice(i, 1); break; }
+            killInvader(invaders[j], j, !!pb.super);
+            if (!pb.super) { playerBullets.splice(i, 1); break; }
           }
         }
       }
@@ -761,6 +758,18 @@
         if (blueBall.x < BLUE_RADIUS || blueBall.x > CANVAS_W - BLUE_RADIUS) blueBall.vx *= -1;
         if (blueBall.y < BLUE_RADIUS || blueBall.y > CANVAS_H - 120) blueBall.vy *= -1;
         if (blueBall.life <= 0) blueBall = null;
+      }
+
+      // the fired mini-beam: a vertical line sweeping left to right across the whole screen
+      if (sweepBeam) {
+        sweepBeam.x += sweepBeam.speed;
+        for (var m = invaders.length - 1; m >= 0; m--) {
+          var invM = invaders[m];
+          if (!(invM.spawnGrace > 0) && sweepBeam.x + SWEEP_THICKNESS > invM.x && sweepBeam.x < invM.x + invM.w) {
+            killInvaderToMini(invM, m);
+          }
+        }
+        if (sweepBeam.x > CANVAS_W) sweepBeam = null;
       }
 
       // shockwaves from a popped ball - anything caught inside dies, no split
@@ -927,12 +936,20 @@
       if (beamCharged) {
         var pulse = 0.5 + 0.3 * Math.sin(Date.now() / 150);
         ctx.fillStyle = "rgba(63,208,255," + pulse + ")";
-        ctx.fillRect(player.x + PLAYER_W / 2 - BEAM_W / 2, player.y - BEAM_H, BEAM_W, BEAM_H);
+        ctx.fillRect(player.x + PLAYER_W / 2 - 4, player.y - PREVIEW_H, 8, PREVIEW_H);
+      }
+
+      // the fired sweep beam: a vertical line crossing the whole screen left to right
+      if (sweepBeam) {
+        ctx.fillStyle = "rgba(63,208,255,0.85)";
+        ctx.fillRect(sweepBeam.x, 0, SWEEP_THICKNESS, CANVAS_H);
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.fillRect(sweepBeam.x + SWEEP_THICKNESS / 2 - 2, 0, 4, CANVAS_H);
       }
 
       // bullets
       playerBullets.forEach(function (pb) {
-        ctx.fillStyle = pb.super ? "#ffb347" : (pb.mini ? "#3fd0ff" : "#fff");
+        ctx.fillStyle = pb.super ? "#ffb347" : "#fff";
         ctx.fillRect(pb.x, pb.y, pb.w, pb.h);
       });
       ctx.fillStyle = "#ff5f5f";
