@@ -139,7 +139,9 @@
 
     var player = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
     var keys = {};
-    var playerBullet = null;
+    var playerBullets = [];
+    var FIRE_COOLDOWN_FRAMES = 8;
+    var fireCooldown = 0;
     var enemyBullets = [];
     var invaders = [];
     var particles = [];
@@ -168,6 +170,13 @@
       document.getElementById("overlayMsg").style.display = "none";
     }
 
+    function randomTier() {
+      var r = Math.random();
+      if (r < 0.4) return 2;  // big, pink
+      if (r < 0.75) return 1; // medium, yellow
+      return 0;               // small, green
+    }
+
     function spawnWave(n) {
       invaders = [];
       var rows = Math.min(3 + Math.floor((n - 1) / 1), 5);
@@ -175,7 +184,7 @@
       var startX = 40, startY = 60, gapX = 52, gapY = 46;
       for (var r = 0; r < rows; r++) {
         for (var c = 0; c < cols; c++) {
-          invaders.push(makeInvader(2, startX + c * gapX, startY + r * gapY, Math.floor(Math.random() * SPRITES.length)));
+          invaders.push(makeInvader(randomTier(), startX + c * gapX, startY + r * gapY, Math.floor(Math.random() * SPRITES.length)));
         }
       }
       formationDir = 1;
@@ -191,7 +200,8 @@
 
     function startGame() {
       score = 0; lives = 3; wave = 1;
-      playerBullet = null;
+      playerBullets = [];
+      fireCooldown = 0;
       enemyBullets = [];
       particles = [];
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
@@ -230,15 +240,14 @@
     }
 
     function firePlayerBullet() {
-      if (playerBullet) return;
-      playerBullet = { x: player.x + PLAYER_W / 2 - 2, y: player.y - 4, w: 4, h: 12 };
+      playerBullets.push({ x: player.x + PLAYER_W / 2 - 2, y: player.y - 4, w: 4, h: 12 });
     }
 
     function maybeFireEnemy() {
       if (state !== "playing") return;
-      if (enemyBullets.length >= 3) return;
+      if (enemyBullets.length >= 4) return;
       if (invaders.length === 0) return;
-      var chance = 0.006 + wave * 0.001;
+      var chance = 0.01 + wave * 0.0015;
       if (Math.random() < chance) {
         var inv = invaders[Math.floor(Math.random() * invaders.length)];
         enemyBullets.push({ x: inv.x + inv.w / 2 - 2, y: inv.y + inv.h, w: 4, h: 12 });
@@ -252,7 +261,7 @@
     function loseLife() {
       lives--;
       updateStatBar();
-      playerBullet = null;
+      playerBullets = [];
       enemyBullets = [];
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
       if (lives <= 0) {
@@ -277,6 +286,12 @@
       if (keys["ArrowRight"] || keys["d"]) player.x += PLAYER_SPEED;
       player.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, player.x));
 
+      if (fireCooldown > 0) fireCooldown--;
+      if (keys["s"] && fireCooldown <= 0) {
+        firePlayerBullet();
+        fireCooldown = FIRE_COOLDOWN_FRAMES;
+      }
+
       // formation movement
       var willHitEdge = false;
       for (var i = 0; i < invaders.length; i++) {
@@ -299,18 +314,19 @@
         }
       }
 
-      // player bullet
-      if (playerBullet) {
-        playerBullet.y -= 7;
-        if (playerBullet.y + playerBullet.h < 0) {
-          playerBullet = null;
-        } else {
-          for (i = 0; i < invaders.length; i++) {
-            if (rectsOverlap(playerBullet, invaders[i])) {
-              killInvader(invaders[i], i);
-              playerBullet = null;
-              break;
-            }
+      // player bullets
+      for (i = playerBullets.length - 1; i >= 0; i--) {
+        var pb = playerBullets[i];
+        pb.y -= 8;
+        if (pb.y + pb.h < 0) {
+          playerBullets.splice(i, 1);
+          continue;
+        }
+        for (var j = 0; j < invaders.length; j++) {
+          if (rectsOverlap(pb, invaders[j])) {
+            killInvader(invaders[j], j);
+            playerBullets.splice(i, 1);
+            break;
           }
         }
       }
@@ -382,10 +398,8 @@
       drawSprite(PLAYER_SPRITE, player.x, player.y, PLAYER_CELL, "#3fd0ff");
 
       // bullets
-      if (playerBullet) {
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(playerBullet.x, playerBullet.y, playerBullet.w, playerBullet.h);
-      }
+      ctx.fillStyle = "#fff";
+      playerBullets.forEach(function (pb) { ctx.fillRect(pb.x, pb.y, pb.w, pb.h); });
       ctx.fillStyle = "#ff5f5f";
       enemyBullets.forEach(function (b) { ctx.fillRect(b.x, b.y, b.w, b.h); });
 
@@ -407,7 +421,6 @@
     document.addEventListener("keydown", function (e) {
       var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       keys[k] = true;
-      if (k === "s") firePlayerBullet();
     });
     document.addEventListener("keyup", function (e) {
       var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
