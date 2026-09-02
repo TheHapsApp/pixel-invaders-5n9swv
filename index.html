@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Pixel Invaders!</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👾</text></svg>">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-user-select: none; user-select: none; }
+    body {
+      font-family: "Comic Sans MS", "Trebuchet MS", system-ui, sans-serif;
+      min-height: 100vh;
+      color: #fff;
+      text-align: center;
+      background: linear-gradient(120deg, #1a0a3a, #3a0a5a, #0a1a4a);
+      background-size: 300% 300%;
+      animation: flow 14s ease infinite;
+      padding: 18px 12px 40px;
+    }
+    @keyframes flow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    h1 { font-size: clamp(1.6rem, 6.5vw, 2.6rem); text-shadow: 3px 3px 0 rgba(0,0,0,0.3); }
+    .sub { font-size: clamp(0.85rem, 3vw, 1.05rem); margin: 6px 0 14px; opacity: 0.9; }
+
+    #statBar {
+      display: flex;
+      justify-content: space-between;
+      max-width: 420px;
+      margin: 0 auto 10px;
+      font-weight: bold;
+      font-size: clamp(0.9rem, 3.4vw, 1.1rem);
+      text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+    }
+
+    #gameWrap {
+      position: relative;
+      max-width: 420px;
+      margin: 0 auto;
+    }
+    #game {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 14px;
+      border: 5px solid #fff;
+      box-shadow: 0 8px 0 rgba(0,0,0,0.3);
+      background: #05041a;
+    }
+    #overlayMsg {
+      display: flex;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      background: rgba(10, 5, 30, 0.75);
+      border-radius: 10px;
+      text-align: center;
+      padding: 16px;
+    }
+    #overlayMsg .big {
+      font-size: clamp(1.3rem, 6vw, 2rem);
+      font-weight: bold;
+      text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+    }
+    #overlayMsg .small { font-size: 0.9rem; opacity: 0.9; max-width: 320px; }
+
+    .btn {
+      font-family: inherit;
+      font-weight: bold;
+      font-size: clamp(1rem, 4.2vw, 1.4rem);
+      color: #1a6e2e;
+      background: #5fff8f;
+      border: 4px solid #fff;
+      border-radius: 24px;
+      padding: 12px 26px;
+      margin: 6px 8px 0;
+      cursor: pointer;
+      box-shadow: 0 6px 0 rgba(0,0,0,0.3);
+    }
+    .btn:active { transform: translateY(3px); box-shadow: 0 3px 0 rgba(0,0,0,0.3); }
+  </style>
+</head>
+<body>
+  <h1>👾 Pixel Invaders!</h1>
+  <p class="sub">← → or A/D to move · S to shoot · big ones split when you hit them!</p>
+
+  <div id="statBar">
+    <span id="scoreLbl">Score: 0</span>
+    <span id="waveLbl">Wave 1</span>
+    <span id="livesLbl">❤️❤️❤️</span>
+  </div>
+
+  <div id="gameWrap">
+    <canvas id="game" width="420" height="600"></canvas>
+    <div id="overlayMsg">
+      <div class="big" id="overlayBig">👾 Pixel Invaders!</div>
+      <div class="small" id="overlaySmall">Bigger invaders break into smaller ones when you shoot them. Don't let them reach the bottom!</div>
+      <button class="btn" id="startBtn">▶️ Start Game</button>
+    </div>
+  </div>
+
+  <script>
+    var CANVAS_W = 420, CANVAS_H = 600;
+    var PLAYER_CELL = 4;
+    var PLAYER_SPRITE = [
+      "00011000",
+      "00011000",
+      "00111100",
+      "00111100",
+      "01111110",
+      "01111110",
+      "11111111",
+      "11111111"
+    ];
+    var PLAYER_W = 8 * PLAYER_CELL, PLAYER_H = 8 * PLAYER_CELL;
+    var PLAYER_Y = CANVAS_H - 48;
+    var PLAYER_SPEED = 4.5;
+
+    var SPRITES = [
+      ["00100100","00111100","01111110","11011011","11111111","00100100","01011010","10100101"],
+      ["00111100","01111110","11011011","11111111","01111110","00100100","01000010","10000001"],
+      ["01000010","00100100","01111110","11011011","11111111","10111101","10100101","00100100"]
+    ];
+
+    var TIERS = [
+      { size: 1, cell: 3,   color: "#5fff8f", points: 40, next: -1, splitCount: 0 },
+      { size: 2, cell: 4,   color: "#ffd23f", points: 20, next: 0,  splitCount: 2 },
+      { size: 3, cell: 5.5, color: "#ff6fb0", points: 10, next: 1,  splitCount: 2 }
+    ];
+
+    var canvas = document.getElementById("game");
+    var ctx = canvas.getContext("2d");
+
+    var player = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
+    var keys = {};
+    var playerBullet = null;
+    var enemyBullets = [];
+    var invaders = [];
+    var particles = [];
+
+    var formationDir = 1;
+    var formationSpeed = 0.7;
+    var formationDropStep = 16;
+
+    var score = 0, lives = 3, wave = 1;
+    var state = "idle"; // idle | playing | gameover
+    var loopStarted = false;
+
+    function updateStatBar() {
+      document.getElementById("scoreLbl").textContent = "Score: " + score;
+      document.getElementById("waveLbl").textContent = "Wave " + wave;
+      document.getElementById("livesLbl").textContent = "❤️".repeat(Math.max(0, lives));
+    }
+
+    function showOverlay(big, small, showStart) {
+      document.getElementById("overlayBig").textContent = big;
+      document.getElementById("overlaySmall").textContent = small || "";
+      document.getElementById("startBtn").style.display = showStart ? "inline-block" : "none";
+      document.getElementById("overlayMsg").style.display = "flex";
+    }
+    function hideOverlay() {
+      document.getElementById("overlayMsg").style.display = "none";
+    }
+
+    function spawnWave(n) {
+      invaders = [];
+      var rows = Math.min(3 + Math.floor((n - 1) / 1), 5);
+      var cols = 6;
+      var startX = 40, startY = 60, gapX = 52, gapY = 46;
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          invaders.push(makeInvader(2, startX + c * gapX, startY + r * gapY, Math.floor(Math.random() * SPRITES.length)));
+        }
+      }
+      formationDir = 1;
+      formationSpeed = 0.7 + (n - 1) * 0.18;
+      formationDropStep = 16 + (n - 1) * 1.5;
+    }
+
+    function makeInvader(tier, x, y, kind) {
+      var t = TIERS[tier];
+      var size = 8 * t.cell;
+      return { tier: tier, kind: kind, x: x, y: y, w: size, h: size };
+    }
+
+    function startGame() {
+      score = 0; lives = 3; wave = 1;
+      playerBullet = null;
+      enemyBullets = [];
+      particles = [];
+      player.x = CANVAS_W / 2 - PLAYER_W / 2;
+      spawnWave(wave);
+      updateStatBar();
+      hideOverlay();
+      state = "playing";
+      if (!loopStarted) { loopStarted = true; requestAnimationFrame(loop); }
+    }
+
+    function spawnParticles(x, y, color) {
+      for (var i = 0; i < 8; i++) {
+        var angle = (Math.PI * 2 * i) / 8;
+        particles.push({
+          x: x, y: y,
+          vx: Math.cos(angle) * (1.5 + Math.random() * 1.5),
+          vy: Math.sin(angle) * (1.5 + Math.random() * 1.5),
+          life: 20, color: color
+        });
+      }
+    }
+
+    function killInvader(inv, index) {
+      var t = TIERS[inv.tier];
+      score += t.points;
+      spawnParticles(inv.x + inv.w / 2, inv.y + inv.h / 2, t.color);
+      invaders.splice(index, 1);
+      if (t.next >= 0) {
+        for (var i = 0; i < t.splitCount; i++) {
+          var offsetX = (i - (t.splitCount - 1) / 2) * (inv.w * 0.4);
+          var child = makeInvader(t.next, inv.x + inv.w / 2 - (8 * TIERS[t.next].cell) / 2 + offsetX, inv.y, Math.floor(Math.random() * SPRITES.length));
+          invaders.push(child);
+        }
+      }
+      updateStatBar();
+    }
+
+    function firePlayerBullet() {
+      if (playerBullet) return;
+      playerBullet = { x: player.x + PLAYER_W / 2 - 2, y: player.y - 4, w: 4, h: 12 };
+    }
+
+    function maybeFireEnemy() {
+      if (state !== "playing") return;
+      if (enemyBullets.length >= 3) return;
+      if (invaders.length === 0) return;
+      var chance = 0.006 + wave * 0.001;
+      if (Math.random() < chance) {
+        var inv = invaders[Math.floor(Math.random() * invaders.length)];
+        enemyBullets.push({ x: inv.x + inv.w / 2 - 2, y: inv.y + inv.h, w: 4, h: 12 });
+      }
+    }
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function loseLife() {
+      lives--;
+      updateStatBar();
+      playerBullet = null;
+      enemyBullets = [];
+      player.x = CANVAS_W / 2 - PLAYER_W / 2;
+      if (lives <= 0) {
+        endGame(false);
+      }
+    }
+
+    function endGame(won) {
+      state = "gameover";
+      showOverlay(
+        won ? "🎉 You Win!" : "💥 Game Over",
+        won ? "Final score: " + score : "The invaders got through! Final score: " + score,
+        true
+      );
+      document.getElementById("startBtn").textContent = "🔄 Play Again";
+    }
+
+    function update() {
+      if (state !== "playing") return;
+
+      if (keys["ArrowLeft"] || keys["a"]) player.x -= PLAYER_SPEED;
+      if (keys["ArrowRight"] || keys["d"]) player.x += PLAYER_SPEED;
+      player.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, player.x));
+
+      // formation movement
+      var willHitEdge = false;
+      for (var i = 0; i < invaders.length; i++) {
+        var inv = invaders[i];
+        var nextX = inv.x + formationDir * formationSpeed;
+        if (nextX < 6 || nextX + inv.w > CANVAS_W - 6) { willHitEdge = true; break; }
+      }
+      if (willHitEdge) {
+        formationDir *= -1;
+        for (i = 0; i < invaders.length; i++) invaders[i].y += formationDropStep;
+      } else {
+        for (i = 0; i < invaders.length; i++) invaders[i].x += formationDir * formationSpeed;
+      }
+
+      // invader reaches player row = game over
+      for (i = 0; i < invaders.length; i++) {
+        if (invaders[i].y + invaders[i].h >= player.y) {
+          endGame(false);
+          return;
+        }
+      }
+
+      // player bullet
+      if (playerBullet) {
+        playerBullet.y -= 7;
+        if (playerBullet.y + playerBullet.h < 0) {
+          playerBullet = null;
+        } else {
+          for (i = 0; i < invaders.length; i++) {
+            if (rectsOverlap(playerBullet, invaders[i])) {
+              killInvader(invaders[i], i);
+              playerBullet = null;
+              break;
+            }
+          }
+        }
+      }
+
+      // enemy bullets
+      for (i = enemyBullets.length - 1; i >= 0; i--) {
+        var b = enemyBullets[i];
+        b.y += 4;
+        if (b.y > CANVAS_H) {
+          enemyBullets.splice(i, 1);
+          continue;
+        }
+        var playerRect = { x: player.x, y: player.y, w: PLAYER_W, h: PLAYER_H };
+        if (rectsOverlap(b, playerRect)) {
+          enemyBullets.splice(i, 1);
+          spawnParticles(player.x + PLAYER_W / 2, player.y + PLAYER_H / 2, "#3fd0ff");
+          loseLife();
+        }
+      }
+      maybeFireEnemy();
+
+      // particles
+      for (i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.vx; p.y += p.vy; p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+
+      // wave clear
+      if (invaders.length === 0) {
+        wave++;
+        spawnWave(wave);
+        updateStatBar();
+      }
+    }
+
+    function drawSprite(pattern, x, y, cell, color) {
+      ctx.fillStyle = color;
+      for (var row = 0; row < 8; row++) {
+        for (var col = 0; col < 8; col++) {
+          if (pattern[row][col] === "1") {
+            ctx.fillRect(x + col * cell, y + row * cell, cell, cell);
+          }
+        }
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.fillStyle = "#05041a";
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+      // stars
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      for (var s = 0; s < 40; s++) {
+        var sx = (s * 137) % CANVAS_W;
+        var sy = (s * 53 + (Date.now() / 40 | 0)) % CANVAS_H;
+        ctx.fillRect(sx, sy, 2, 2);
+      }
+
+      // invaders
+      for (var i = 0; i < invaders.length; i++) {
+        var inv = invaders[i];
+        var t = TIERS[inv.tier];
+        drawSprite(SPRITES[inv.kind], inv.x, inv.y, t.cell, t.color);
+      }
+
+      // player
+      drawSprite(PLAYER_SPRITE, player.x, player.y, PLAYER_CELL, "#3fd0ff");
+
+      // bullets
+      if (playerBullet) {
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(playerBullet.x, playerBullet.y, playerBullet.w, playerBullet.h);
+      }
+      ctx.fillStyle = "#ff5f5f";
+      enemyBullets.forEach(function (b) { ctx.fillRect(b.x, b.y, b.w, b.h); });
+
+      // particles
+      particles.forEach(function (p) {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, p.life / 20);
+        ctx.fillRect(p.x, p.y, 3, 3);
+        ctx.globalAlpha = 1;
+      });
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.addEventListener("keydown", function (e) {
+      var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      keys[k] = true;
+      if (k === "s") firePlayerBullet();
+    });
+    document.addEventListener("keyup", function (e) {
+      var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      keys[k] = false;
+    });
+
+    document.getElementById("startBtn").addEventListener("click", startGame);
+
+    updateStatBar();
+    draw();
+  </script>
+</body>
+</html>
