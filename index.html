@@ -166,9 +166,81 @@
     var SHOCKWAVE_GROW_SPEED = 6.3;
     var shockwaves = [];
 
+    var RAINBOW_RADIUS = 14;
+    var rainbowBall = null;
+    var rainbowTimer = 1800;
+
+    var FIRE_RADIUS = 12;
+    var fireBall = null;
+    var fireTimer = 1200;
+
+    var TRAIL_LIFE = 36;
+    var trailParticles = [];
+
+    var POWERUP_DURATION = 480; // 8s at 60fps
+    var powerupTimer = 0;
+    var SUPER_BULLET_W = 10;
+    var SUPER_BULLET_H = 3 * (8 * TIERS[2].cell); // as tall as 3 big red invaders
+    var SUPER_BULLET_SPEED = 20;
+
     var score = 0, lives = 3, wave = 1;
     var state = "idle"; // idle | playing | gameover
     var loopStarted = false;
+
+    var audioCtx = null;
+    function getAudioCtx() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+
+    function playShootSound() {
+      var ctx = getAudioCtx();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.14, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.12);
+    }
+
+    function playExplosionSound(big) {
+      var ctx = getAudioCtx();
+      var dur = big ? 0.7 : 0.35;
+      var bufferSize = Math.floor(ctx.sampleRate * dur);
+      var buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      var data = buffer.getChannelData(0);
+      for (var i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      var noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      var filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(big ? 1200 : 900, ctx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + dur);
+      var gain = ctx.createGain();
+      gain.gain.setValueAtTime(big ? 0.5 : 0.32, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+      noise.start(); noise.stop(ctx.currentTime + dur);
+    }
+
+    function playPowerupSound() {
+      var ctx = getAudioCtx();
+      [440, 660, 880, 1100].forEach(function (f, idx) {
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = "square";
+        var t0 = ctx.currentTime + idx * 0.06;
+        osc.frequency.setValueAtTime(f, t0);
+        gain.gain.setValueAtTime(0.001, t0);
+        gain.gain.linearRampToValueAtTime(0.16, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.12);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(t0); osc.stop(t0 + 0.13);
+      });
+    }
 
     function updateStatBar() {
       document.getElementById("scoreLbl").textContent = "Score: " + score;
@@ -215,6 +287,9 @@
     }
 
     function startGame() {
+      var ctx = getAudioCtx();
+      if (ctx.state === "suspended") ctx.resume();
+
       score = 0; lives = 3; wave = 1;
       playerBullets = [];
       fireCooldown = 0;
@@ -223,6 +298,12 @@
       ball = null;
       ballTimer = 300;
       shockwaves = [];
+      rainbowBall = null;
+      rainbowTimer = 1800 + Math.random() * 1800;
+      fireBall = null;
+      fireTimer = 1200 + Math.random() * 1200;
+      trailParticles = [];
+      powerupTimer = 0;
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
       spawnWave(wave);
       updateStatBar();
@@ -259,7 +340,16 @@
     }
 
     function firePlayerBullet() {
-      playerBullets.push({ x: player.x + PLAYER_W / 2 - 3.5, y: player.y - 4, w: 7, h: 18 });
+      if (powerupTimer > 0) {
+        playerBullets.push({
+          x: player.x + PLAYER_W / 2 - SUPER_BULLET_W / 2,
+          y: player.y - SUPER_BULLET_H,
+          w: SUPER_BULLET_W, h: SUPER_BULLET_H, super: true
+        });
+      } else {
+        playerBullets.push({ x: player.x + PLAYER_W / 2 - 3.5, y: player.y - 4, w: 7, h: 18 });
+      }
+      playShootSound();
     }
 
     function maybeFireEnemy() {
@@ -296,6 +386,44 @@
     function triggerExplosion(x, y) {
       shockwaves.push({ x: x, y: y, radius: 6 });
       ball = null;
+      playExplosionSound(false);
+    }
+
+    function spawnRainbowBall() {
+      var fromLeft = Math.random() < 0.5;
+      var x = fromLeft ? 10 : CANVAS_W - 10;
+      var y = 60 + Math.random() * (CANVAS_H - 260);
+      var vx = (fromLeft ? 1 : -1) * (1 + Math.random());
+      var vy = (Math.random() - 0.5) * 2;
+      rainbowBall = { x: x, y: y, vx: vx, vy: vy, life: 900 };
+    }
+
+    function killAllInvaders() {
+      for (var idx = invaders.length - 1; idx >= 0; idx--) {
+        killInvader(invaders[idx], idx, true);
+      }
+    }
+
+    function triggerMegaExplosion(x, y) {
+      shockwaves.push({ x: x, y: y, radius: 10, maxRadius: 950, grow: 16 });
+      killAllInvaders();
+      rainbowBall = null;
+      playExplosionSound(true);
+    }
+
+    function spawnFire() {
+      var fromLeft = Math.random() < 0.5;
+      fireBall = {
+        x: fromLeft ? -20 : CANVAS_W + 20,
+        y: 40 + Math.random() * 60,
+        vx: (fromLeft ? 1 : -1) * 2.4
+      };
+    }
+
+    function activatePowerup() {
+      powerupTimer = POWERUP_DURATION;
+      fireBall = null;
+      playPowerupSound();
     }
 
     function loseLife() {
@@ -357,26 +485,77 @@
         }
       }
 
-      // player bullets
+      // player bullets (super bullets pierce through everything instead of stopping)
       for (i = playerBullets.length - 1; i >= 0; i--) {
         var pb = playerBullets[i];
-        pb.y -= 10;
+        pb.y -= pb.super ? SUPER_BULLET_SPEED : 10;
         if (pb.y + pb.h < 0) {
           playerBullets.splice(i, 1);
           continue;
         }
+
+        var consumed = false;
         if (ball && circleRectOverlap(ball.x, ball.y, BALL_RADIUS, pb)) {
           triggerExplosion(ball.x, ball.y);
+          consumed = true;
+        }
+        if (rainbowBall && circleRectOverlap(rainbowBall.x, rainbowBall.y, RAINBOW_RADIUS, pb)) {
+          triggerMegaExplosion(rainbowBall.x, rainbowBall.y);
+          consumed = true;
+        }
+        if (fireBall && circleRectOverlap(fireBall.x, fireBall.y, FIRE_RADIUS, pb)) {
+          activatePowerup();
+          consumed = true;
+        }
+        if (consumed && !pb.super) {
           playerBullets.splice(i, 1);
           continue;
         }
-        for (var j = 0; j < invaders.length; j++) {
+
+        for (var j = invaders.length - 1; j >= 0; j--) {
           if (rectsOverlap(pb, invaders[j])) {
-            killInvader(invaders[j], j);
-            playerBullets.splice(i, 1);
-            break;
+            killInvader(invaders[j], j, !!pb.super);
+            if (!pb.super) { playerBullets.splice(i, 1); break; }
           }
         }
+      }
+
+      // rare rainbow ball: leaves a fading trail, clears the wave when shot
+      if (!rainbowBall) {
+        rainbowTimer--;
+        if (rainbowTimer <= 0) {
+          spawnRainbowBall();
+          rainbowTimer = 1800 + Math.random() * 1800;
+        }
+      } else {
+        rainbowBall.x += rainbowBall.vx;
+        rainbowBall.y += rainbowBall.vy;
+        rainbowBall.life--;
+        if (rainbowBall.x < RAINBOW_RADIUS || rainbowBall.x > CANVAS_W - RAINBOW_RADIUS) rainbowBall.vx *= -1;
+        if (rainbowBall.y < RAINBOW_RADIUS || rainbowBall.y > CANVAS_H - 140) rainbowBall.vy *= -1;
+        trailParticles.push({ x: rainbowBall.x, y: rainbowBall.y, life: TRAIL_LIFE, maxLife: TRAIL_LIFE, hue: (Date.now() / 5) % 360 });
+        if (rainbowBall.life <= 0) rainbowBall = null;
+      }
+
+      // rare fire streak: flies across the sky, grants a super-bullet power-up when shot
+      if (!fireBall) {
+        fireTimer--;
+        if (fireTimer <= 0) {
+          spawnFire();
+          fireTimer = 1200 + Math.random() * 1200;
+        }
+      } else {
+        fireBall.x += fireBall.vx;
+        trailParticles.push({ x: fireBall.x, y: fireBall.y, life: TRAIL_LIFE, maxLife: TRAIL_LIFE, fire: true });
+        if (fireBall.x < -30 || fireBall.x > CANVAS_W + 30) fireBall = null;
+      }
+
+      if (powerupTimer > 0) powerupTimer--;
+
+      // trail particles fade out over time
+      for (i = trailParticles.length - 1; i >= 0; i--) {
+        trailParticles[i].life--;
+        if (trailParticles[i].life <= 0) trailParticles.splice(i, 1);
       }
 
       // mystery ball: spawns every once in a while and drifts around
@@ -398,7 +577,9 @@
       // shockwaves from a popped ball - anything caught inside dies, no split
       for (i = shockwaves.length - 1; i >= 0; i--) {
         var sw = shockwaves[i];
-        sw.radius += SHOCKWAVE_GROW_SPEED;
+        var swGrow = sw.grow || SHOCKWAVE_GROW_SPEED;
+        var swMax = sw.maxRadius || SHOCKWAVE_MAX_RADIUS;
+        sw.radius += swGrow;
         for (var k = invaders.length - 1; k >= 0; k--) {
           var inv2 = invaders[k];
           var icx = inv2.x + inv2.w / 2, icy = inv2.y + inv2.h / 2;
@@ -407,7 +588,7 @@
             killInvader(inv2, k, true);
           }
         }
-        if (sw.radius >= SHOCKWAVE_MAX_RADIUS) shockwaves.splice(i, 1);
+        if (sw.radius >= swMax) shockwaves.splice(i, 1);
       }
 
       // enemy bullets
@@ -474,6 +655,17 @@
         drawSprite(pattern, inv.x, inv.y, t.cell, t.color);
       }
 
+      // trails (rainbow ball + fire streak), fading out over their lifetime
+      trailParticles.forEach(function (tp) {
+        var alpha = Math.max(0, tp.life / tp.maxLife);
+        ctx.beginPath();
+        ctx.arc(tp.x, tp.y, tp.fire ? 7 : 8, 0, Math.PI * 2);
+        ctx.fillStyle = tp.fire
+          ? "rgba(255,140,50," + (alpha * 0.7) + ")"
+          : "hsla(" + tp.hue + ",100%,60%," + (alpha * 0.7) + ")";
+        ctx.fill();
+      });
+
       // mystery ball
       if (ball) {
         ctx.beginPath();
@@ -485,9 +677,36 @@
         ctx.stroke();
       }
 
+      // rare rainbow ball
+      if (rainbowBall) {
+        ctx.beginPath();
+        ctx.arc(rainbowBall.x, rainbowBall.y, RAINBOW_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = "hsl(" + ((Date.now() / 4) % 360) + ",100%,60%)";
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // rare fire streak
+      if (fireBall) {
+        ctx.beginPath();
+        ctx.arc(fireBall.x, fireBall.y, FIRE_RADIUS + 5, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,140,50,0.35)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(fireBall.x, fireBall.y, FIRE_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffb347";
+        ctx.fill();
+        ctx.strokeStyle = "#ff5f2a";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
       // shockwaves
       shockwaves.forEach(function (sw) {
-        var alpha = Math.max(0, 1 - sw.radius / SHOCKWAVE_MAX_RADIUS);
+        var swMax = sw.maxRadius || SHOCKWAVE_MAX_RADIUS;
+        var alpha = Math.max(0, 1 - sw.radius / swMax);
         ctx.beginPath();
         ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(255,255,255," + (alpha * 0.25) + ")";
@@ -497,12 +716,14 @@
         ctx.stroke();
       });
 
-      // player
-      drawSprite(PLAYER_SPRITE, player.x, player.y, PLAYER_CELL, "#3fd0ff");
+      // player (turns orange while the super-bullet power-up is active)
+      drawSprite(PLAYER_SPRITE, player.x, player.y, PLAYER_CELL, powerupTimer > 0 ? "#ff8f3f" : "#3fd0ff");
 
       // bullets
-      ctx.fillStyle = "#fff";
-      playerBullets.forEach(function (pb) { ctx.fillRect(pb.x, pb.y, pb.w, pb.h); });
+      playerBullets.forEach(function (pb) {
+        ctx.fillStyle = pb.super ? "#ffb347" : "#fff";
+        ctx.fillRect(pb.x, pb.y, pb.w, pb.h);
+      });
       ctx.fillStyle = "#ff5f5f";
       enemyBullets.forEach(function (b) { ctx.fillRect(b.x, b.y, b.w, b.h); });
 
