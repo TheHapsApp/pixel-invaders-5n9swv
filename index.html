@@ -142,6 +142,7 @@
     <div class="itemTimer" id="ballTimerBadge"><span class="itemIcon">💣</span><span>Bomb: <span id="ballTimerLbl">50s</span></span></div>
     <div class="itemTimer" id="rainbowTimerBadge"><span class="itemIcon">🌈</span><span>Ultimate Bomb: <span id="rainbowTimerLbl">50s</span></span></div>
     <div class="itemTimer" id="fireTimerBadge"><span class="itemIcon">🔥</span><span>Super Ball: <span id="fireTimerLbl">50s</span></span></div>
+    <div class="itemTimer" id="blueTimerBadge"><span class="itemIcon">🔵</span><span>Blue Beam: <span id="blueTimerLbl">50s</span></span></div>
   </div>
 
   <div id="gameWrap">
@@ -227,6 +228,11 @@
     var fireTimer = ITEM_SPAWN_INTERVAL;
     var fireDelay = 180; // starts counting 3s after the game begins
 
+    var BLUE_RADIUS = 13;
+    var blueBall = null;
+    var blueTimer = ITEM_SPAWN_INTERVAL;
+    var blueDelay = 240; // starts counting 4s after the game begins
+
     var TRAIL_LIFE = 36;
     var trailParticles = [];
 
@@ -235,6 +241,11 @@
     var SUPER_BULLET_W = 20;
     var SUPER_BULLET_H = 3 * (8 * TIERS[2].cell); // as tall as 3 big red invaders
     var SUPER_BULLET_SPEED = 12;
+
+    var beamCharged = false;
+    var BEAM_W = 16;
+    var BEAM_H = 3 * (8 * TIERS[2].cell);
+    var BEAM_SPEED = 14;
 
     var score = 0, lives = 3, wave = 1;
     var state = "idle"; // idle | playing | gameover
@@ -320,6 +331,11 @@
       var fireBadge = document.getElementById("fireTimerBadge");
       if (fireBall) { fireLbl.textContent = "Go get it!"; fireBadge.classList.add("ready"); }
       else { fireLbl.textContent = fmtSeconds(fireDelay + fireTimer); fireBadge.classList.remove("ready"); }
+
+      var blueLbl = document.getElementById("blueTimerLbl");
+      var blueBadge = document.getElementById("blueTimerBadge");
+      if (blueBall) { blueLbl.textContent = "Go get it!"; blueBadge.classList.add("ready"); }
+      else { blueLbl.textContent = fmtSeconds(blueDelay + blueTimer); blueBadge.classList.remove("ready"); }
     }
 
     function showOverlay(big, small, showStart) {
@@ -379,6 +395,10 @@
       fireBall = null;
       fireTimer = ITEM_SPAWN_INTERVAL;
       fireDelay = 180;
+      blueBall = null;
+      blueTimer = ITEM_SPAWN_INTERVAL;
+      blueDelay = 240;
+      beamCharged = false;
       trailParticles = [];
       powerupTimer = 0;
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
@@ -411,6 +431,7 @@
         for (var i = 0; i < t.splitCount; i++) {
           var offsetX = (i - (t.splitCount - 1) / 2) * (inv.w * 0.4);
           var child = makeInvader(t.next, inv.x + inv.w / 2 - (8 * TIERS[t.next].cell) / 2 + offsetX, inv.y, Math.floor(Math.random() * SPRITES.length));
+          child.spawnGrace = 20; // briefly immune so a piercing bullet doesn't insta-kill its own children
           invaders.push(child);
         }
       }
@@ -418,7 +439,14 @@
     }
 
     function firePlayerBullet() {
-      if (powerupTimer > 0) {
+      if (beamCharged) {
+        playerBullets.push({
+          x: player.x + PLAYER_W / 2 - BEAM_W / 2,
+          y: player.y - BEAM_H,
+          w: BEAM_W, h: BEAM_H, mini: true
+        });
+        beamCharged = false;
+      } else if (powerupTimer > 0) {
         playerBullets.push({
           x: player.x + PLAYER_W / 2 - SUPER_BULLET_W / 2,
           y: player.y - SUPER_BULLET_H,
@@ -510,6 +538,40 @@
       playPowerupSound();
     }
 
+    function spawnBlueBall() {
+      var fromLeft = Math.random() < 0.5;
+      var x = fromLeft ? 10 : CANVAS_W - 10;
+      var y = 60 + Math.random() * (CANVAS_H - 220);
+      var vx = (fromLeft ? 1 : -1) * (1 + Math.random());
+      var vy = (Math.random() - 0.5) * 2;
+      blueBall = { x: x, y: y, vx: vx, vy: vy, life: 700 };
+    }
+
+    function activateBeam() {
+      beamCharged = true;
+      blueBall = null;
+      playPowerupSound();
+    }
+
+    // like a normal kill, but instead of splitting one tier down, the
+    // invader jumps straight to its miniature (smallest) version
+    function killInvaderToMini(inv, index) {
+      var t = TIERS[inv.tier];
+      score += t.points;
+      spawnParticles(inv.x + inv.w / 2, inv.y + inv.h / 2, t.color);
+      invaders.splice(index, 1);
+      if (inv.tier > 0) {
+        var miniT = TIERS[0];
+        for (var i = 0; i < 2; i++) {
+          var offsetX = (i - 0.5) * (inv.w * 0.4);
+          var child = makeInvader(0, inv.x + inv.w / 2 - (8 * miniT.cell) / 2 + offsetX, inv.y, Math.floor(Math.random() * SPRITES.length));
+          child.spawnGrace = 20; // briefly immune so the same beam pass doesn't insta-kill its own children
+          invaders.push(child);
+        }
+      }
+      updateStatBar();
+    }
+
     function loseLife() {
       lives--;
       updateStatBar();
@@ -547,6 +609,11 @@
         fireCooldown = FIRE_COOLDOWN_FRAMES;
       }
 
+      // count down each invader's brief post-split spawn immunity
+      for (var g = 0; g < invaders.length; g++) {
+        if (invaders[g].spawnGrace > 0) invaders[g].spawnGrace--;
+      }
+
       // formation movement
       var willHitEdge = false;
       for (var i = 0; i < invaders.length; i++) {
@@ -569,10 +636,11 @@
         }
       }
 
-      // player bullets (super bullets pierce through everything instead of stopping)
+      // player bullets (super + beam bullets pierce through everything instead of stopping)
       for (i = playerBullets.length - 1; i >= 0; i--) {
         var pb = playerBullets[i];
-        pb.y -= pb.super ? SUPER_BULLET_SPEED : 10;
+        var pierces = pb.super || pb.mini;
+        pb.y -= pb.super ? SUPER_BULLET_SPEED : (pb.mini ? BEAM_SPEED : 10);
         if (pb.y + pb.h < 0) {
           playerBullets.splice(i, 1);
           continue;
@@ -591,15 +659,20 @@
           activatePowerup();
           consumed = true;
         }
-        if (consumed && !pb.super) {
+        if (blueBall && circleRectOverlap(blueBall.x, blueBall.y, BLUE_RADIUS, pb)) {
+          activateBeam();
+          consumed = true;
+        }
+        if (consumed && !pierces) {
           playerBullets.splice(i, 1);
           continue;
         }
 
         for (var j = invaders.length - 1; j >= 0; j--) {
-          if (rectsOverlap(pb, invaders[j])) {
-            killInvader(invaders[j], j, !!pb.super);
-            if (!pb.super) { playerBullets.splice(i, 1); break; }
+          if (!(invaders[j].spawnGrace > 0) && rectsOverlap(pb, invaders[j])) {
+            if (pb.mini) { killInvaderToMini(invaders[j], j); }
+            else { killInvader(invaders[j], j, !!pb.super); }
+            if (!pierces) { playerBullets.splice(i, 1); break; }
           }
         }
       }
@@ -668,6 +741,26 @@
         if (ball.x < BALL_RADIUS || ball.x > CANVAS_W - BALL_RADIUS) ball.vx *= -1;
         if (ball.y < BALL_RADIUS || ball.y > CANVAS_H - 120) ball.vy *= -1;
         if (ball.life <= 0) ball = null;
+      }
+
+      // rare blue ball: charges up a one-shot mini-beam
+      if (!blueBall) {
+        if (blueDelay > 0) {
+          blueDelay--;
+        } else {
+          blueTimer--;
+          if (blueTimer <= 0) {
+            spawnBlueBall();
+            blueTimer = ITEM_SPAWN_INTERVAL;
+          }
+        }
+      } else {
+        blueBall.x += blueBall.vx;
+        blueBall.y += blueBall.vy;
+        blueBall.life--;
+        if (blueBall.x < BLUE_RADIUS || blueBall.x > CANVAS_W - BLUE_RADIUS) blueBall.vx *= -1;
+        if (blueBall.y < BLUE_RADIUS || blueBall.y > CANVAS_H - 120) blueBall.vy *= -1;
+        if (blueBall.life <= 0) blueBall = null;
       }
 
       // shockwaves from a popped ball - anything caught inside dies, no split
@@ -803,6 +896,17 @@
         ctx.stroke();
       }
 
+      // rare blue ball
+      if (blueBall) {
+        ctx.beginPath();
+        ctx.arc(blueBall.x, blueBall.y, BLUE_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = "#3fd0ff";
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
       // shockwaves
       shockwaves.forEach(function (sw) {
         var swMax = sw.maxRadius || SHOCKWAVE_MAX_RADIUS;
@@ -819,9 +923,16 @@
       // player (turns orange while the super-bullet power-up is active)
       drawSprite(PLAYER_SPRITE, player.x, player.y, PLAYER_CELL, powerupTimer > 0 ? "#ff8f3f" : "#3fd0ff");
 
+      // charged mini-beam preview, sitting on the tip of the ship until you fire
+      if (beamCharged) {
+        var pulse = 0.5 + 0.3 * Math.sin(Date.now() / 150);
+        ctx.fillStyle = "rgba(63,208,255," + pulse + ")";
+        ctx.fillRect(player.x + PLAYER_W / 2 - BEAM_W / 2, player.y - BEAM_H, BEAM_W, BEAM_H);
+      }
+
       // bullets
       playerBullets.forEach(function (pb) {
-        ctx.fillStyle = pb.super ? "#ffb347" : "#fff";
+        ctx.fillStyle = pb.super ? "#ffb347" : (pb.mini ? "#3fd0ff" : "#fff");
         ctx.fillRect(pb.x, pb.y, pb.w, pb.h);
       });
       ctx.fillStyle = "#ff5f5f";
