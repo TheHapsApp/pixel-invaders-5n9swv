@@ -128,6 +128,14 @@
       ["01000010","00100100","01111110","11011011","11111111","10111101","10100101","00100100"]
     ];
 
+    // simple walk-cycle: swap the last two rows for a leg-wiggle look
+    function altFrame(pattern) {
+      var p = pattern.slice();
+      var tmp = p[6]; p[6] = p[7]; p[7] = tmp;
+      return p;
+    }
+    var animFrame = 0, animTimer = 0;
+
     var TIERS = [
       { size: 1, cell: 3,   color: "#5fff8f", points: 40, next: -1, splitCount: 0 },
       { size: 2, cell: 4,   color: "#ffd23f", points: 20, next: 0,  splitCount: 2 },
@@ -147,8 +155,16 @@
     var particles = [];
 
     var formationDir = 1;
-    var formationSpeed = 0.7;
+    var formationSpeed = 1.3;
     var formationDropStep = 16;
+
+    var BALL_RADIUS = 10;
+    var ball = null;
+    var ballTimer = 300;
+
+    var SHOCKWAVE_MAX_RADIUS = 170;
+    var SHOCKWAVE_GROW_SPEED = 5;
+    var shockwaves = [];
 
     var score = 0, lives = 3, wave = 1;
     var state = "idle"; // idle | playing | gameover
@@ -188,7 +204,7 @@
         }
       }
       formationDir = 1;
-      formationSpeed = 0.7 + (n - 1) * 0.18;
+      formationSpeed = 1.3 + (n - 1) * 0.25;
       formationDropStep = 16 + (n - 1) * 1.5;
     }
 
@@ -204,6 +220,9 @@
       fireCooldown = 0;
       enemyBullets = [];
       particles = [];
+      ball = null;
+      ballTimer = 300;
+      shockwaves = [];
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
       spawnWave(wave);
       updateStatBar();
@@ -224,12 +243,12 @@
       }
     }
 
-    function killInvader(inv, index) {
+    function killInvader(inv, index, skipSplit) {
       var t = TIERS[inv.tier];
       score += t.points;
       spawnParticles(inv.x + inv.w / 2, inv.y + inv.h / 2, t.color);
       invaders.splice(index, 1);
-      if (t.next >= 0) {
+      if (!skipSplit && t.next >= 0) {
         for (var i = 0; i < t.splitCount; i++) {
           var offsetX = (i - (t.splitCount - 1) / 2) * (inv.w * 0.4);
           var child = makeInvader(t.next, inv.x + inv.w / 2 - (8 * TIERS[t.next].cell) / 2 + offsetX, inv.y, Math.floor(Math.random() * SPRITES.length));
@@ -258,6 +277,27 @@
       return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
     }
 
+    function circleRectOverlap(cx, cy, cr, rect) {
+      var nx = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+      var ny = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+      var dx = cx - nx, dy = cy - ny;
+      return (dx * dx + dy * dy) <= cr * cr;
+    }
+
+    function spawnBall() {
+      var fromLeft = Math.random() < 0.5;
+      var x = fromLeft ? 10 : CANVAS_W - 10;
+      var y = 60 + Math.random() * (CANVAS_H - 220);
+      var vx = (fromLeft ? 1 : -1) * (1 + Math.random());
+      var vy = (Math.random() - 0.5) * 2;
+      ball = { x: x, y: y, vx: vx, vy: vy, life: 700 };
+    }
+
+    function triggerExplosion(x, y) {
+      shockwaves.push({ x: x, y: y, radius: 6 });
+      ball = null;
+    }
+
     function loseLife() {
       lives--;
       updateStatBar();
@@ -281,6 +321,9 @@
 
     function update() {
       if (state !== "playing") return;
+
+      animTimer++;
+      if (animTimer >= 18) { animTimer = 0; animFrame = 1 - animFrame; }
 
       if (keys["ArrowLeft"] || keys["a"]) player.x -= PLAYER_SPEED;
       if (keys["ArrowRight"] || keys["d"]) player.x += PLAYER_SPEED;
@@ -322,6 +365,11 @@
           playerBullets.splice(i, 1);
           continue;
         }
+        if (ball && circleRectOverlap(ball.x, ball.y, BALL_RADIUS, pb)) {
+          triggerExplosion(ball.x, ball.y);
+          playerBullets.splice(i, 1);
+          continue;
+        }
         for (var j = 0; j < invaders.length; j++) {
           if (rectsOverlap(pb, invaders[j])) {
             killInvader(invaders[j], j);
@@ -329,6 +377,37 @@
             break;
           }
         }
+      }
+
+      // mystery ball: spawns every once in a while and drifts around
+      if (!ball) {
+        ballTimer--;
+        if (ballTimer <= 0) {
+          spawnBall();
+          ballTimer = 600 + Math.random() * 600;
+        }
+      } else {
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+        ball.life--;
+        if (ball.x < BALL_RADIUS || ball.x > CANVAS_W - BALL_RADIUS) ball.vx *= -1;
+        if (ball.y < BALL_RADIUS || ball.y > CANVAS_H - 120) ball.vy *= -1;
+        if (ball.life <= 0) ball = null;
+      }
+
+      // shockwaves from a popped ball - anything caught inside dies, no split
+      for (i = shockwaves.length - 1; i >= 0; i--) {
+        var sw = shockwaves[i];
+        sw.radius += SHOCKWAVE_GROW_SPEED;
+        for (var k = invaders.length - 1; k >= 0; k--) {
+          var inv2 = invaders[k];
+          var icx = inv2.x + inv2.w / 2, icy = inv2.y + inv2.h / 2;
+          var dx2 = icx - sw.x, dy2 = icy - sw.y;
+          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) <= sw.radius) {
+            killInvader(inv2, k, true);
+          }
+        }
+        if (sw.radius >= SHOCKWAVE_MAX_RADIUS) shockwaves.splice(i, 1);
       }
 
       // enemy bullets
@@ -387,12 +466,36 @@
         ctx.fillRect(sx, sy, 2, 2);
       }
 
-      // invaders
+      // invaders (animated walk-cycle)
       for (var i = 0; i < invaders.length; i++) {
         var inv = invaders[i];
         var t = TIERS[inv.tier];
-        drawSprite(SPRITES[inv.kind], inv.x, inv.y, t.cell, t.color);
+        var pattern = animFrame === 0 ? SPRITES[inv.kind] : altFrame(SPRITES[inv.kind]);
+        drawSprite(pattern, inv.x, inv.y, t.cell, t.color);
       }
+
+      // mystery ball
+      if (ball) {
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff27a";
+        ctx.fill();
+        ctx.strokeStyle = "#ff6fb0";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // shockwaves
+      shockwaves.forEach(function (sw) {
+        var alpha = Math.max(0, 1 - sw.radius / SHOCKWAVE_MAX_RADIUS);
+        ctx.beginPath();
+        ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255," + (alpha * 0.25) + ")";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,210,63," + alpha + ")";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      });
 
       // player
       drawSprite(PLAYER_SPRITE, player.x, player.y, PLAYER_CELL, "#3fd0ff");
