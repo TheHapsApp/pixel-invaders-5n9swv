@@ -92,6 +92,26 @@
     }
     #overlayMsg .small { font-size: 0.9rem; opacity: 0.9; max-width: 320px; }
 
+    #megaMsg {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      font-size: clamp(1.4rem, 6.5vw, 2.2rem);
+      font-weight: bold;
+      color: #fff;
+      text-shadow: 0 0 10px #ff6fb0, 0 0 18px #ffd23f, 3px 3px 0 rgba(0,0,0,0.4);
+      pointer-events: none;
+      z-index: 15;
+      animation: megaPop 0.35s ease;
+    }
+    @keyframes megaPop {
+      0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+      100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    }
+
     .btn {
       font-family: inherit;
       font-weight: bold;
@@ -131,6 +151,7 @@
       <div class="small" id="overlaySmall">Bigger invaders break into smaller ones when you shoot them. Don't let them reach the bottom!</div>
       <button class="btn" id="startBtn">▶️ Start Game</button>
     </div>
+    <div id="megaMsg">🌈 ULTIMATE BOMB!<br>Wave Cleared!</div>
   </div>
 
   <script>
@@ -466,6 +487,12 @@
       killAllInvaders();
       rainbowBall = null;
       playExplosionSound(true);
+      var msg = document.getElementById("megaMsg");
+      msg.style.display = "block";
+      msg.style.animation = "none";
+      void msg.offsetWidth; // restart the pop animation if it's already showing
+      msg.style.animation = "megaPop 0.35s ease";
+      setTimeout(function () { msg.style.display = "none"; }, 1500);
     }
 
     function spawnFire() {
