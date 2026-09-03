@@ -240,6 +240,32 @@
     }
     .chatBtn { background: rgba(255,255,255,0.25) !important; }
 
+    #podium {
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .podiumCol { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .podiumRank { font-weight: bold; font-size: 0.8rem; opacity: 0.9; }
+    .podiumName {
+      font-weight: bold;
+      font-size: 0.8rem;
+      max-width: 64px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-shadow: 1px 1px 0 rgba(0,0,0,0.4);
+    }
+    .podiumBar {
+      width: 44px;
+      border-radius: 8px 8px 0 0;
+      border: 3px solid #fff;
+      border-bottom: none;
+    }
+    .podiumTime { font-size: 0.72rem; opacity: 0.9; }
+
     .colorRow .nicknameInput { margin-top: 6px; width: 160px; font-size: 0.95rem; }
 
     #joinCodeInput, #peopleCountInput {
@@ -399,6 +425,7 @@
         <div class="small">Couldn't find any people. Check the code and try again!</div>
         <button class="btn" id="notFoundTryAgainBtn">🔙 Try Again</button>
       </div>
+      <div id="podium"></div>
       <button class="btn" id="playAgainBtn" style="display:none;">🔄 Play Again</button>
     </div>
     <div id="megaMsg">🌈 ULTIMATE BOMB!<br>All Clear!</div>
@@ -1138,7 +1165,7 @@
           x: homeX, y: PLAYER_Y, homeX: homeX,
           keys: pi === 0 ? keys : {},
           fireCooldown: 0,
-          lives: 3, flash: 0, deathFlash: 0, destroyed: false, chatting: false,
+          lives: 3, flash: 0, deathFlash: 0, destroyed: false, chatting: false, survivalFrames: 0,
           color: (useColors && useColors[pi]) || (isBot ? BOT_COLOR : COLOR_PALETTE[pi % COLOR_PALETTE.length].hex),
           nickname: nick,
           isBot: isBot,
@@ -1147,6 +1174,7 @@
         });
       }
       buildControls();
+      document.getElementById("podium").style.display = "none";
 
       for (var s0 = 0; s0 < 7; s0++) spawnOneInvader();
       spawnTimer = 30;
@@ -1391,6 +1419,55 @@
         won ? "Final score: " + score : "The invaders got through! Final score: " + score,
         true
       );
+      buildPodium();
+    }
+
+    function formatSurvivalTime(frames) {
+      var secs = Math.floor(frames / 60);
+      var m = Math.floor(secs / 60), s = secs % 60;
+      return m > 0 ? (m + "m " + s + "s") : (s + "s");
+    }
+
+    // shows who lasted longest, like 1st/2nd/3rd place - only makes sense with more than one player
+    function buildPodium() {
+      var el = document.getElementById("podium");
+      if (players.length < 2) { el.style.display = "none"; return; }
+      el.innerHTML = "";
+      var ranked = players.slice().sort(function (a, b) { return b.survivalFrames - a.survivalFrames; });
+      var maxFrames = Math.max(1, ranked[0].survivalFrames);
+      var minBarH = 30, maxBarH = 140;
+      var ranks = ["1st", "2nd", "3rd", "4th"];
+      ranked.forEach(function (pl, i) {
+        var frac = pl.survivalFrames / maxFrames;
+        var h = minBarH + frac * (maxBarH - minBarH);
+        var col = document.createElement("div");
+        col.className = "podiumCol";
+
+        var rankLbl = document.createElement("div");
+        rankLbl.className = "podiumRank";
+        rankLbl.textContent = ranks[i] || (i + 1) + "th";
+        col.appendChild(rankLbl);
+
+        var name = document.createElement("div");
+        name.className = "podiumName";
+        name.style.color = pl.color;
+        name.textContent = pl.nickname || ("Player " + pl.num);
+        col.appendChild(name);
+
+        var bar = document.createElement("div");
+        bar.className = "podiumBar";
+        bar.style.height = h + "px";
+        bar.style.background = pl.color;
+        col.appendChild(bar);
+
+        var time = document.createElement("div");
+        time.className = "podiumTime";
+        time.textContent = formatSurvivalTime(pl.survivalFrames);
+        col.appendChild(time);
+
+        el.appendChild(col);
+      });
+      el.style.display = "flex";
     }
 
     function checkGameOver() {
@@ -1408,6 +1485,7 @@
 
       // every player: death sequence, spectator mode, or normal movement/shooting
       players.forEach(function (pl) {
+        if (!pl.destroyed) pl.survivalFrames++;
         if (pl.deathFlash > 0) {
           pl.deathFlash--;
           if (pl.deathFlash <= 0) {
