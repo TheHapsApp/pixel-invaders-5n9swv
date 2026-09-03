@@ -129,11 +129,38 @@
     }
     .btn:active { transform: translateY(3px); box-shadow: 0 3px 0 rgba(0,0,0,0.3); }
 
-    #modeButtons, #joinPrompt {
+    #modeButtons, #friendChoice, #peopleCountPrompt, #colorPick {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 4px;
+    }
+    #peopleCountInput {
+      font-family: inherit;
+      font-size: 1.3rem;
+      font-weight: bold;
+      text-align: center;
+      width: 70px;
+      padding: 6px;
+      border-radius: 12px;
+      border: 3px solid #fff;
+      margin: 6px 0;
+    }
+    .colorRow { margin-bottom: 10px; }
+    .colorRow .rowLabel { font-weight: bold; margin-bottom: 4px; }
+    .swatchRow { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+    .swatchBtn {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.4);
+      cursor: pointer;
+      padding: 0;
+    }
+    .swatchBtn.selected {
+      border-color: #fff;
+      transform: scale(1.18);
+      box-shadow: 0 0 0 3px rgba(255,255,255,0.5);
     }
 
     #controls {
@@ -166,8 +193,6 @@
       user-select: none;
     }
     .ctrlBtn:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,0.3); }
-    .ctrlGroup.p1 .ctrlBtn { background: rgba(63,208,255,0.4); }
-    .ctrlGroup.p2 .ctrlBtn { background: rgba(196,110,255,0.4); }
     .ctrlBtn.fireBtn { background: rgba(255,143,63,0.55) !important; }
 
     #secretTestBtn {
@@ -199,8 +224,7 @@
   <div id="statBar">
     <span id="scoreLbl">Score: 0</span>
     <span id="aliveLbl">Invaders: 0</span>
-    <span id="livesLbl">❤️❤️❤️</span>
-    <span id="lives2Lbl" style="display:none;">💜💜💜</span>
+    <span id="livesLbl"></span>
   </div>
 
   <div id="itemTimers">
@@ -219,27 +243,26 @@
         <button class="btn" id="soloBtn">🧍 Play Solo</button>
         <button class="btn" id="coopBtn">👥 Play with a Friend</button>
       </div>
-      <div id="joinPrompt" style="display:none;">
-        <div class="small">Player 2, tap below when you're ready!</div>
-        <button class="btn" id="joinBtn">🙋 Tap to Join!</button>
+      <div id="friendChoice" style="display:none;">
+        <button class="btn" id="computerBtn">🤖 Play with a Computer</button>
+        <button class="btn" id="peopleBtn">🧑‍🤝‍🧑 Play with People</button>
+      </div>
+      <div id="peopleCountPrompt" style="display:none;">
+        <div class="small">How many people are playing?</div>
+        <input type="number" id="peopleCountInput" min="1" max="4" value="2">
+        <button class="btn" id="peopleCountGoBtn">▶️ Next</button>
+      </div>
+      <div id="colorPick" style="display:none;">
+        <div class="small">Pick your colors so everyone knows who's who!</div>
+        <div id="colorPickRows"></div>
+        <button class="btn" id="colorStartBtn">▶️ Start!</button>
       </div>
       <button class="btn" id="playAgainBtn" style="display:none;">🔄 Play Again</button>
     </div>
     <div id="megaMsg">🌈 ULTIMATE BOMB!<br>All Clear!</div>
   </div>
 
-  <div id="controls">
-    <div class="ctrlGroup p1" id="p1Controls">
-      <button class="ctrlBtn" id="p1LeftBtn">◀</button>
-      <button class="ctrlBtn fireBtn" id="p1FireBtn">🔥</button>
-      <button class="ctrlBtn" id="p1RightBtn">▶</button>
-    </div>
-    <div class="ctrlGroup p2" id="p2Controls" style="display:none;">
-      <button class="ctrlBtn" id="p2LeftBtn">◀</button>
-      <button class="ctrlBtn fireBtn" id="p2FireBtn">🔥</button>
-      <button class="ctrlBtn" id="p2RightBtn">▶</button>
-    </div>
-  </div>
+  <div id="controls"></div>
 
   <script>
     var CANVAS_W = 900, CANVAS_H = 750;
@@ -247,9 +270,16 @@
     var PLAYER_W = 8 * PLAYER_CELL, PLAYER_H = 8 * PLAYER_CELL;
     var PLAYER_Y = CANVAS_H - 60;
     var PLAYER_SPEED = 9;
-    var playerFlash = 0;       // brief flash after a non-fatal hit
-    var playerDeathFlash = 0;  // fast flash right before the ship is destroyed
-    var playerDestroyed = false;
+
+    var COLOR_PALETTE = [
+      { name: "Blue",   hex: "#3fd0ff" },
+      { name: "Purple", hex: "#b26bff" },
+      { name: "Teal",   hex: "#2dd4bf" },
+      { name: "Gold",   hex: "#ffcc33" },
+      { name: "White",  hex: "#f5f5f5" },
+      { name: "Red",    hex: "#ff5f5f" }
+    ];
+    var BOT_COLOR = "#ff5f5f";
 
     var SPRITES = [
       ["00100100","00111100","01111110","11011011","11111111","00100100","01011010","10100101"],
@@ -275,22 +305,14 @@
     var ctx = canvas.getContext("2d");
 
     var playerCount = 1;
-    var p2AutoPilot = false; // secret test mode: player 2 is driven by a simple bot
-
-    var player = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
-    var keys = {};
+    var keys = {}; // keyboard always drives players[0]
     var mouse = { x: CANVAS_W / 2, y: CANVAS_H / 2, active: false };
     var playerBullets = [];
     var FIRE_COOLDOWN_FRAMES = 8;
-    var fireCooldown = 0;
+    var reticleCooldown = 0; // shared cooldown for the mouse/tap-to-snipe reticle
 
-    var player2 = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
-    var keys2 = {};
-    var fireCooldown2 = 0;
-    var lives2 = 3;
-    var playerFlash2 = 0;
-    var playerDeathFlash2 = 0;
-    var playerDestroyed2 = false;
+    var players = []; // { x, y, homeX, keys, fireCooldown, lives, flash, deathFlash, destroyed, color, isBot, num }
+
     var enemyBullets = [];
     var invaders = [];
     var particles = [];
@@ -343,7 +365,7 @@
     var SWEEP_THICKNESS = 18;
     var SWEEP_SPEED = 9;
 
-    var score = 0, lives = 3;
+    var score = 0;
     var state = "idle"; // idle | playing | gameover
     var loopStarted = false;
 
@@ -405,8 +427,12 @@
     function updateStatBar() {
       document.getElementById("scoreLbl").textContent = "Score: " + score;
       document.getElementById("aliveLbl").textContent = "Invaders: " + invaders.length;
-      document.getElementById("livesLbl").textContent = "❤️".repeat(Math.max(0, lives));
-      document.getElementById("lives2Lbl").textContent = "💜".repeat(Math.max(0, lives2));
+      var html = players.map(function (pl) {
+        var hearts = "";
+        for (var h = 0; h < Math.max(0, pl.lives); h++) hearts += "❤️";
+        return '<span style="color:' + pl.color + '">P' + pl.num + "</span> " + hearts;
+      }).join("&nbsp;&nbsp;");
+      document.getElementById("livesLbl").innerHTML = html;
     }
 
     function fmtSeconds(frames) {
@@ -435,11 +461,17 @@
       else { blueLbl.textContent = fmtSeconds(blueDelay + blueTimer); blueBadge.classList.remove("ready"); }
     }
 
+    var OVERLAY_STEPS = ["modeButtons", "friendChoice", "peopleCountPrompt", "colorPick", "playAgainBtn"];
+    function hideAllOverlaySteps() {
+      OVERLAY_STEPS.forEach(function (id) {
+        document.getElementById(id).style.display = "none";
+      });
+    }
+
     function showOverlay(big, small, showStart) {
       document.getElementById("overlayBig").textContent = big;
       document.getElementById("overlaySmall").textContent = small || "";
-      document.getElementById("modeButtons").style.display = "none";
-      document.getElementById("joinPrompt").style.display = "none";
+      hideAllOverlaySteps();
       document.getElementById("playAgainBtn").style.display = showStart ? "inline-block" : "none";
       document.getElementById("overlayMsg").style.display = "flex";
     }
@@ -450,15 +482,94 @@
     function showModeSelect() {
       document.getElementById("overlayBig").textContent = "👾 Pixel Invaders!";
       document.getElementById("overlaySmall").textContent = "Bigger invaders break into smaller ones when you shoot them. Don't let them reach the bottom!";
+      hideAllOverlaySteps();
       document.getElementById("modeButtons").style.display = "flex";
-      document.getElementById("joinPrompt").style.display = "none";
-      document.getElementById("playAgainBtn").style.display = "none";
       document.getElementById("overlayMsg").style.display = "flex";
     }
 
-    function showJoinPrompt() {
-      document.getElementById("modeButtons").style.display = "none";
-      document.getElementById("joinPrompt").style.display = "flex";
+    function showFriendChoice() {
+      hideAllOverlaySteps();
+      document.getElementById("friendChoice").style.display = "flex";
+    }
+
+    function showPeopleCountPrompt() {
+      hideAllOverlaySteps();
+      document.getElementById("peopleCountPrompt").style.display = "flex";
+    }
+
+    var pendingColors = [];
+    var pendingPlayerCount = 1;
+    var pendingBotMode = false;
+    function showColorPickScreen(count, botMode) {
+      pendingPlayerCount = count;
+      pendingBotMode = botMode;
+      pendingColors = new Array(count);
+      for (var pi = 0; pi < count; pi++) {
+        var isBot = botMode && pi === count - 1;
+        pendingColors[pi] = isBot ? BOT_COLOR : COLOR_PALETTE[pi % COLOR_PALETTE.length].hex;
+      }
+
+      var rowsEl = document.getElementById("colorPickRows");
+      rowsEl.innerHTML = "";
+      for (var i = 0; i < count; i++) {
+        (function (idx) {
+          var isBotRow = botMode && idx === count - 1;
+          var row = document.createElement("div");
+          row.className = "colorRow";
+          var label = document.createElement("div");
+          label.className = "rowLabel";
+          label.textContent = isBotRow ? "🤖 Computer" : ("Player " + (idx + 1));
+          row.appendChild(label);
+          if (!isBotRow) {
+            var swatchRow = document.createElement("div");
+            swatchRow.className = "swatchRow";
+            COLOR_PALETTE.forEach(function (c) {
+              var sw = document.createElement("button");
+              sw.className = "swatchBtn";
+              sw.style.background = c.hex;
+              sw.setAttribute("data-player", idx);
+              sw.setAttribute("data-hex", c.hex);
+              sw.addEventListener("click", function () {
+                pendingColors[idx] = c.hex;
+                refreshSwatchHighlights();
+              });
+              swatchRow.appendChild(sw);
+            });
+            row.appendChild(swatchRow);
+          }
+          rowsEl.appendChild(row);
+        })(i);
+      }
+      refreshSwatchHighlights();
+
+      hideAllOverlaySteps();
+      document.getElementById("colorPick").style.display = "flex";
+    }
+    function refreshSwatchHighlights() {
+      var swatches = document.getElementById("colorPickRows").querySelectorAll(".swatchBtn");
+      for (var i = 0; i < swatches.length; i++) {
+        var btn = swatches[i];
+        var pIdx = parseInt(btn.getAttribute("data-player"), 10);
+        var hex = btn.getAttribute("data-hex");
+        btn.classList.toggle("selected", pendingColors[pIdx] === hex);
+      }
+    }
+
+    function showBigMessage(html, duration) {
+      var msg = document.getElementById("megaMsg");
+      msg.innerHTML = html;
+      msg.style.display = "block";
+      msg.style.animation = "none";
+      void msg.offsetWidth; // restart the pop animation if it's already showing
+      msg.style.animation = "megaPop 0.35s ease";
+      setTimeout(function () { msg.style.display = "none"; }, duration);
+    }
+
+    function announceElimination(pl) {
+      var remaining = players.filter(function (p) { return !p.destroyed; }).length;
+      var label = "Player " + pl.num + (pl.isBot ? " (Computer)" : "") + " is out!";
+      var remText = remaining === 1 ? "1 remaining" : remaining + " remaining";
+      showBigMessage(label + "<br>" + remText, 1800);
     }
 
     function randomTier() {
@@ -482,16 +593,17 @@
       return { tier: tier, kind: kind, x: x, y: y, w: size, h: size };
     }
 
-    function startGame(count) {
+    function startGame(count, botMode, colors) {
       if (count) playerCount = count;
+      var useBotMode = !!botMode;
+      var useColors = colors || pendingColors;
 
       var ctx = getAudioCtx();
       if (ctx.state === "suspended") ctx.resume();
 
-      score = 0; lives = 3; lives2 = 3;
+      score = 0;
       playerBullets = [];
-      fireCooldown = 0;
-      fireCooldown2 = 0;
+      reticleCooldown = 0;
       enemyBullets = [];
       particles = [];
       invaders = [];
@@ -513,21 +625,27 @@
       sweepBeam = null;
       trailParticles = [];
       powerupTimer = 0;
-      playerFlash = 0;
-      playerDeathFlash = 0;
-      playerDestroyed = false;
-      playerFlash2 = 0;
-      playerDeathFlash2 = 0;
-      playerDestroyed2 = false;
 
-      if (playerCount === 2) {
-        player.x = CANVAS_W / 2 - PLAYER_W - 20;
-        player2.x = CANVAS_W / 2 + 20;
-      } else {
-        player.x = CANVAS_W / 2 - PLAYER_W / 2;
+      // lay the ships out evenly, centered
+      var spacing = Math.min(150, (CANVAS_W - 80) / Math.max(1, playerCount));
+      var totalWidth = spacing * (playerCount - 1) + PLAYER_W;
+      var startX = CANVAS_W / 2 - totalWidth / 2;
+
+      players = [];
+      for (var pi = 0; pi < playerCount; pi++) {
+        var isBot = useBotMode && pi === playerCount - 1;
+        var homeX = startX + pi * spacing;
+        players.push({
+          x: homeX, y: PLAYER_Y, homeX: homeX,
+          keys: pi === 0 ? keys : {},
+          fireCooldown: 0,
+          lives: 3, flash: 0, deathFlash: 0, destroyed: false,
+          color: (useColors && useColors[pi]) || (isBot ? BOT_COLOR : COLOR_PALETTE[pi % COLOR_PALETTE.length].hex),
+          isBot: isBot,
+          num: pi + 1
+        });
       }
-      document.getElementById("p2Controls").style.display = playerCount === 2 ? "flex" : "none";
-      document.getElementById("lives2Lbl").style.display = playerCount === 2 ? "inline" : "none";
+      buildControls();
 
       for (var s0 = 0; s0 < 7; s0++) spawnOneInvader();
       spawnTimer = 30;
@@ -536,6 +654,40 @@
       hideOverlay();
       state = "playing";
       if (!loopStarted) { loopStarted = true; requestAnimationFrame(loop); }
+    }
+
+    function buildControls() {
+      var wrap = document.getElementById("controls");
+      wrap.innerHTML = "";
+      players.forEach(function (pl) {
+        if (pl.isBot) return; // bots don't need on-screen buttons
+        var group = document.createElement("div");
+        group.className = "ctrlGroup";
+        var left = document.createElement("button");
+        left.className = "ctrlBtn";
+        left.textContent = "◀";
+        var fire = document.createElement("button");
+        fire.className = "ctrlBtn fireBtn";
+        fire.textContent = "🔥";
+        var right = document.createElement("button");
+        right.className = "ctrlBtn";
+        right.textContent = "▶";
+        [left, right].forEach(function (btn) { btn.style.background = pl.color + "66"; });
+        group.appendChild(left);
+        group.appendChild(fire);
+        group.appendChild(right);
+        bindHoldButton(left, pl.keys, "ArrowLeft");
+        bindHoldButton(right, pl.keys, "ArrowRight");
+        bindHoldButton(fire, pl.keys, "s");
+        wrap.appendChild(group);
+      });
+    }
+
+    function bindHoldButton(el, keyObj, keyName) {
+      el.addEventListener("pointerdown", function (e) { e.preventDefault(); keyObj[keyName] = true; });
+      el.addEventListener("pointerup", function () { keyObj[keyName] = false; });
+      el.addEventListener("pointerleave", function () { keyObj[keyName] = false; });
+      el.addEventListener("pointercancel", function () { keyObj[keyName] = false; });
     }
 
     function spawnParticles(x, y, color) {
@@ -567,55 +719,39 @@
       updateStatBar();
     }
 
-    function firePlayerBullet() {
+    // every player shares the same power-ups - it's a team effort
+    function firePlayerShot(pl) {
       if (beamCharged) {
         sweepBeam = { x: 0, speed: SWEEP_SPEED };
         beamCharged = false;
       } else if (powerupTimer > 0) {
         playerBullets.push({
-          x: player.x + PLAYER_W / 2 - SUPER_BULLET_W / 2,
-          y: player.y - SUPER_BULLET_H,
+          x: pl.x + PLAYER_W / 2 - SUPER_BULLET_W / 2,
+          y: pl.y - SUPER_BULLET_H,
           w: SUPER_BULLET_W, h: SUPER_BULLET_H, super: true
         });
       } else {
-        playerBullets.push({ x: player.x + PLAYER_W / 2 - 3.5, y: player.y - 4, w: 7, h: 18 });
+        playerBullets.push({ x: pl.x + PLAYER_W / 2 - 3.5, y: pl.y - 4, w: 7, h: 18 });
       }
       playShootSound();
     }
 
-    // player 2 shares the same power-ups as player 1 - it's a team effort
-    function firePlayer2Bullet() {
-      if (beamCharged) {
-        sweepBeam = { x: 0, speed: SWEEP_SPEED };
-        beamCharged = false;
-      } else if (powerupTimer > 0) {
-        playerBullets.push({
-          x: player2.x + PLAYER_W / 2 - SUPER_BULLET_W / 2,
-          y: player2.y - SUPER_BULLET_H,
-          w: SUPER_BULLET_W, h: SUPER_BULLET_H, super: true
-        });
-      } else {
-        playerBullets.push({ x: player2.x + PLAYER_W / 2 - 3.5, y: player2.y - 4, w: 7, h: 18 });
-      }
-      playShootSound();
-    }
-
-    // secret test mode: a simple bot drifts toward the nearest invader and fires now and then
-    function runP2AutoPilot() {
+    // bot players: drift toward the nearest invader and fire now and then
+    function runBotAI(pl) {
       if (invaders.length === 0) {
-        keys2["ArrowLeft"] = false; keys2["ArrowRight"] = false; keys2["s"] = false;
+        pl.keys["ArrowLeft"] = false; pl.keys["ArrowRight"] = false; pl.keys["s"] = false;
         return;
       }
       var target = invaders[0], bestDist = Infinity;
       for (var ai = 0; ai < invaders.length; ai++) {
-        var d = Math.abs((invaders[ai].x + invaders[ai].w / 2) - (player2.x + PLAYER_W / 2));
+        var d = Math.abs((invaders[ai].x + invaders[ai].w / 2) - (pl.x + PLAYER_W / 2));
         if (d < bestDist) { bestDist = d; target = invaders[ai]; }
       }
       var targetCx = target.x + target.w / 2;
-      var myCx = player2.x + PLAYER_W / 2;
-      keys2["ArrowLeft"] = targetCx < myCx - 6;
-      keys2["ArrowRight"] = targetCx > myCx + 6;
-      keys2["s"] = Math.random() < 0.08;
+      var myCx = pl.x + PLAYER_W / 2;
+      pl.keys["ArrowLeft"] = targetCx < myCx - 6;
+      pl.keys["ArrowRight"] = targetCx > myCx + 6;
+      pl.keys["s"] = Math.random() < 0.08;
     }
 
     function maybeFireEnemy() {
@@ -675,12 +811,7 @@
       killAllInvaders();
       rainbowBall = null;
       playExplosionSound(true);
-      var msg = document.getElementById("megaMsg");
-      msg.style.display = "block";
-      msg.style.animation = "none";
-      void msg.offsetWidth; // restart the pop animation if it's already showing
-      msg.style.animation = "megaPop 0.35s ease";
-      setTimeout(function () { msg.style.display = "none"; }, 1500);
+      showBigMessage("🌈 ULTIMATE BOMB!<br>All Clear!", 1500);
     }
 
     function spawnFire() {
@@ -733,23 +864,13 @@
       updateStatBar();
     }
 
-    function loseLife() {
-      lives--;
+    function loseLifeFor(pl) {
+      pl.lives--;
       updateStatBar();
-      if (lives <= 0) {
-        playerDeathFlash = 36; // fast flash, then the ship disappears
+      if (pl.lives <= 0) {
+        pl.deathFlash = 36; // fast flash, then the ship disappears
       } else {
-        player.x = playerCount === 2 ? CANVAS_W / 2 - PLAYER_W - 20 : CANVAS_W / 2 - PLAYER_W / 2;
-      }
-    }
-
-    function loseLife2() {
-      lives2--;
-      updateStatBar();
-      if (lives2 <= 0) {
-        playerDeathFlash2 = 36; // fast flash, then the ship disappears
-      } else {
-        player2.x = CANVAS_W / 2 + 20;
+        pl.x = pl.homeX;
       }
     }
 
@@ -763,59 +884,41 @@
     }
 
     function checkGameOver() {
-      if (playerCount === 1) {
-        if (playerDestroyed) endGame(false);
-      } else if (playerDestroyed && playerDestroyed2) {
-        endGame(false);
-      }
+      var allDown = players.every(function (pl) { return pl.destroyed; });
+      if (allDown) endGame(false);
     }
 
     function update() {
       if (state !== "playing") return;
 
+      if (reticleCooldown > 0) reticleCooldown--;
+
       animTimer++;
       if (animTimer >= 18) { animTimer = 0; animFrame = 1 - animFrame; }
 
-      // player 1
-      if (playerDeathFlash > 0) {
-        playerDeathFlash--;
-        if (playerDeathFlash <= 0) {
-          playerDestroyed = true;
-          checkGameOver();
-        }
-      } else if (!playerDestroyed) {
-        if (playerFlash > 0) playerFlash--;
-        if (keys["ArrowLeft"] || keys["a"]) player.x -= PLAYER_SPEED;
-        if (keys["ArrowRight"] || keys["d"]) player.x += PLAYER_SPEED;
-        player.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, player.x));
-        if (fireCooldown > 0) fireCooldown--;
-        if (keys["s"] && fireCooldown <= 0) {
-          firePlayerBullet();
-          fireCooldown = FIRE_COOLDOWN_FRAMES;
-        }
-      }
-
-      // player 2 (co-op only)
-      if (playerCount === 2) {
-        if (p2AutoPilot && !playerDestroyed2) runP2AutoPilot();
-        if (playerDeathFlash2 > 0) {
-          playerDeathFlash2--;
-          if (playerDeathFlash2 <= 0) {
-            playerDestroyed2 = true;
+      // every player: death sequence, or normal movement/shooting
+      players.forEach(function (pl) {
+        if (pl.deathFlash > 0) {
+          pl.deathFlash--;
+          if (pl.deathFlash <= 0) {
+            pl.destroyed = true;
+            announceElimination(pl);
             checkGameOver();
           }
-        } else if (!playerDestroyed2) {
-          if (playerFlash2 > 0) playerFlash2--;
-          if (keys2["ArrowLeft"]) player2.x -= PLAYER_SPEED;
-          if (keys2["ArrowRight"]) player2.x += PLAYER_SPEED;
-          player2.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, player2.x));
-          if (fireCooldown2 > 0) fireCooldown2--;
-          if (keys2["s"] && fireCooldown2 <= 0) {
-            firePlayer2Bullet();
-            fireCooldown2 = FIRE_COOLDOWN_FRAMES;
-          }
+          return;
         }
-      }
+        if (pl.destroyed) return;
+        if (pl.isBot) runBotAI(pl);
+        if (pl.flash > 0) pl.flash--;
+        if (pl.keys["ArrowLeft"] || pl.keys["a"]) pl.x -= PLAYER_SPEED;
+        if (pl.keys["ArrowRight"] || pl.keys["d"]) pl.x += PLAYER_SPEED;
+        pl.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, pl.x));
+        if (pl.fireCooldown > 0) pl.fireCooldown--;
+        if (pl.keys["s"] && pl.fireCooldown <= 0) {
+          firePlayerShot(pl);
+          pl.fireCooldown = FIRE_COOLDOWN_FRAMES;
+        }
+      });
 
       if (state !== "playing") return; // a checkGameOver() above may have just ended it
 
@@ -840,7 +943,7 @@
 
       // invader reaches player row = game over
       for (i = 0; i < invaders.length; i++) {
-        if (invaders[i].y + invaders[i].h >= player.y) {
+        if (invaders[i].y + invaders[i].h >= PLAYER_Y) {
           endGame(false);
           return;
         }
@@ -1010,16 +1113,15 @@
           enemyBullets.splice(i, 1);
           continue;
         }
-        if (!playerDestroyed && rectsOverlap(b, { x: player.x, y: player.y, w: PLAYER_W, h: PLAYER_H })) {
-          spawnParticles(b.x + b.w / 2, b.y + b.h / 2, "#ff8f3f");
-          playerFlash = 20;
-          loseLife();
-          enemyBullets.splice(i, 1);
-        } else if (playerCount === 2 && !playerDestroyed2 && rectsOverlap(b, { x: player2.x, y: player2.y, w: PLAYER_W, h: PLAYER_H })) {
-          spawnParticles(b.x + b.w / 2, b.y + b.h / 2, "#ff8f3f");
-          playerFlash2 = 20;
-          loseLife2();
-          enemyBullets.splice(i, 1);
+        for (var pi2 = 0; pi2 < players.length; pi2++) {
+          var pl2 = players[pi2];
+          if (!pl2.destroyed && pl2.deathFlash <= 0 && rectsOverlap(b, { x: pl2.x, y: pl2.y, w: PLAYER_W, h: PLAYER_H })) {
+            spawnParticles(b.x + b.w / 2, b.y + b.h / 2, "#ff8f3f");
+            pl2.flash = 20;
+            loseLifeFor(pl2);
+            enemyBullets.splice(i, 1);
+            break;
+          }
         }
       }
       maybeFireEnemy();
@@ -1160,25 +1262,20 @@
         ctx.stroke();
       });
 
-      // player ship(s) - plain arrows, flash white on a hit and red fast right before destroyed
-      if (!playerDestroyed) {
-        var shipColor = powerupTimer > 0 ? "#ff8f3f" : "#3fd0ff";
-        if (playerFlash > 0 && Math.floor(playerFlash / 4) % 2 === 0) shipColor = "#fff";
-        if (playerDeathFlash > 0 && Math.floor(playerDeathFlash / 2) % 2 === 0) shipColor = "#ff3b3b";
-        drawShip(player, shipColor);
-      }
-      if (playerCount === 2 && !playerDestroyed2) {
-        var shipColor2 = powerupTimer > 0 ? "#ff8f3f" : "#c46eff";
-        if (playerFlash2 > 0 && Math.floor(playerFlash2 / 4) % 2 === 0) shipColor2 = "#fff";
-        if (playerDeathFlash2 > 0 && Math.floor(playerDeathFlash2 / 2) % 2 === 0) shipColor2 = "#ff3b3b";
-        drawShip(player2, shipColor2);
-      }
+      // player ships - plain arrows in their chosen color, flash white on a hit and red fast right before destroyed
+      players.forEach(function (pl) {
+        if (pl.destroyed) return;
+        var shipColor = powerupTimer > 0 ? "#ff8f3f" : pl.color;
+        if (pl.flash > 0 && Math.floor(pl.flash / 4) % 2 === 0) shipColor = "#fff";
+        if (pl.deathFlash > 0 && Math.floor(pl.deathFlash / 2) % 2 === 0) shipColor = "#ff3b3b";
+        drawShip(pl, shipColor);
+      });
 
-      // charged mini-beam preview, sitting on the tip of the ship until you fire
-      if (beamCharged) {
+      // charged mini-beam preview, sitting on the tip of the first ship until you fire
+      if (beamCharged && players[0] && !players[0].destroyed) {
         var pulse = 0.5 + 0.3 * Math.sin(Date.now() / 150);
         ctx.fillStyle = "rgba(63,208,255," + pulse + ")";
-        ctx.fillRect(player.x + PLAYER_W / 2 - 4, player.y - PREVIEW_H, 8, PREVIEW_H);
+        ctx.fillRect(players[0].x + PLAYER_W / 2 - 4, players[0].y - PREVIEW_H, 8, PREVIEW_H);
       }
 
       // the fired sweep beam: a vertical line crossing the whole screen left to right
@@ -1282,8 +1379,8 @@
       if (state !== "playing") return;
       var pt = canvasPoint(e);
       mouse.x = pt.x; mouse.y = pt.y; mouse.active = true;
-      if (fireCooldown > 0) return;
-      fireCooldown = FIRE_COOLDOWN_FRAMES;
+      if (reticleCooldown > 0) return;
+      reticleCooldown = FIRE_COOLDOWN_FRAMES;
       playShootSound();
       for (var k = invaders.length - 1; k >= 0; k--) {
         var inv = invaders[k];
@@ -1294,30 +1391,31 @@
       }
     });
 
-    document.getElementById("soloBtn").addEventListener("click", function () { startGame(1); });
-    document.getElementById("coopBtn").addEventListener("click", showJoinPrompt);
-    document.getElementById("joinBtn").addEventListener("click", function () { startGame(2); });
-    document.getElementById("playAgainBtn").addEventListener("click", function () { startGame(); });
-
-    document.getElementById("secretTestBtn").addEventListener("click", function () {
-      p2AutoPilot = true;
-      startGame(2);
+    document.getElementById("soloBtn").addEventListener("click", function () {
+      pendingPlayerCount = 1; pendingBotMode = false; pendingColors = [COLOR_PALETTE[0].hex];
+      startGame(1, false, pendingColors);
+    });
+    document.getElementById("coopBtn").addEventListener("click", showFriendChoice);
+    document.getElementById("computerBtn").addEventListener("click", function () { showColorPickScreen(2, true); });
+    document.getElementById("peopleBtn").addEventListener("click", showPeopleCountPrompt);
+    document.getElementById("peopleCountGoBtn").addEventListener("click", function () {
+      var n = parseInt(document.getElementById("peopleCountInput").value, 10);
+      if (!n || n < 1) n = 1;
+      if (n > 4) n = 4;
+      showColorPickScreen(n, false);
+    });
+    document.getElementById("colorStartBtn").addEventListener("click", function () {
+      startGame(pendingPlayerCount, pendingBotMode, pendingColors);
+    });
+    document.getElementById("playAgainBtn").addEventListener("click", function () {
+      startGame(pendingPlayerCount, pendingBotMode, pendingColors);
     });
 
-    // on-screen touch/click controls - hold to move or fire, works for mobile and desktop alike
-    function bindHoldButton(id, keyObj, keyName) {
-      var el = document.getElementById(id);
-      el.addEventListener("pointerdown", function (e) { e.preventDefault(); keyObj[keyName] = true; });
-      el.addEventListener("pointerup", function () { keyObj[keyName] = false; });
-      el.addEventListener("pointerleave", function () { keyObj[keyName] = false; });
-      el.addEventListener("pointercancel", function () { keyObj[keyName] = false; });
-    }
-    bindHoldButton("p1LeftBtn", keys, "ArrowLeft");
-    bindHoldButton("p1RightBtn", keys, "ArrowRight");
-    bindHoldButton("p1FireBtn", keys, "s");
-    bindHoldButton("p2LeftBtn", keys2, "ArrowLeft");
-    bindHoldButton("p2RightBtn", keys2, "ArrowRight");
-    bindHoldButton("p2FireBtn", keys2, "s");
+    document.getElementById("secretTestBtn").addEventListener("click", function () {
+      pendingPlayerCount = 2; pendingBotMode = true;
+      pendingColors = [COLOR_PALETTE[0].hex, BOT_COLOR];
+      startGame(2, true, pendingColors);
+    });
 
     updateStatBar();
     draw();
