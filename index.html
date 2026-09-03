@@ -160,19 +160,12 @@
   <script>
     var CANVAS_W = 900, CANVAS_H = 750;
     var PLAYER_CELL = 5;
-    var PLAYER_SPRITE = [
-      "00011000",
-      "00011000",
-      "00111100",
-      "00111100",
-      "01111110",
-      "01111110",
-      "11111111",
-      "11111111"
-    ];
     var PLAYER_W = 8 * PLAYER_CELL, PLAYER_H = 8 * PLAYER_CELL;
     var PLAYER_Y = CANVAS_H - 60;
     var PLAYER_SPEED = 9;
+    var playerFlash = 0;       // brief flash after a non-fatal hit
+    var playerDeathFlash = 0;  // fast flash right before the ship is destroyed
+    var playerDestroyed = false;
 
     var SPRITES = [
       ["00100100","00111100","01111110","11011011","11111111","00100100","01011010","10100101"],
@@ -405,6 +398,9 @@
       sweepBeam = null;
       trailParticles = [];
       powerupTimer = 0;
+      playerFlash = 0;
+      playerDeathFlash = 0;
+      playerDestroyed = false;
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
       for (var s0 = 0; s0 < 7; s0++) spawnOneInvader();
       spawnTimer = 30;
@@ -462,9 +458,9 @@
 
     function maybeFireEnemy() {
       if (state !== "playing") return;
-      if (enemyBullets.length >= 4) return;
+      if (enemyBullets.length >= 7) return;
       if (invaders.length === 0) return;
-      var chance = 0.003 + invaders.length * 0.0007;
+      var chance = 0.007 + invaders.length * 0.0014;
       if (Math.random() < chance) {
         var inv = invaders[Math.floor(Math.random() * invaders.length)];
         enemyBullets.push({ x: inv.x + inv.w / 2 - 2.5, y: inv.y + inv.h, w: 5, h: 15 });
@@ -578,11 +574,12 @@
     function loseLife() {
       lives--;
       updateStatBar();
-      playerBullets = [];
-      enemyBullets = [];
-      player.x = CANVAS_W / 2 - PLAYER_W / 2;
       if (lives <= 0) {
-        endGame(false);
+        playerDeathFlash = 36; // fast flash, then the ship disappears and the game ends
+      } else {
+        playerBullets = [];
+        enemyBullets = [];
+        player.x = CANVAS_W / 2 - PLAYER_W / 2;
       }
     }
 
@@ -598,6 +595,17 @@
 
     function update() {
       if (state !== "playing") return;
+
+      if (playerDeathFlash > 0) {
+        playerDeathFlash--;
+        if (playerDeathFlash <= 0) {
+          playerDestroyed = true;
+          endGame(false);
+        }
+        return; // freeze the action while the ship flashes out
+      }
+
+      if (playerFlash > 0) playerFlash--;
 
       animTimer++;
       if (animTimer >= 18) { animTimer = 0; animFrame = 1 - animFrame; }
@@ -805,8 +813,10 @@
         }
         var playerRect = { x: player.x, y: player.y, w: PLAYER_W, h: PLAYER_H };
         if (rectsOverlap(b, playerRect)) {
+          var hitX = b.x + b.w / 2, hitY = b.y + b.h / 2;
           enemyBullets.splice(i, 1);
-          spawnParticles(player.x + PLAYER_W / 2, player.y + PLAYER_H / 2, "#3fd0ff");
+          spawnParticles(hitX, hitY, "#ff8f3f");
+          playerFlash = 20;
           loseLife();
         }
       }
@@ -839,6 +849,20 @@
           }
         }
       }
+    }
+
+    function drawShip(color) {
+      var cx = player.x + PLAYER_W / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, player.y);
+      ctx.lineTo(player.x + PLAYER_W, player.y + PLAYER_H);
+      ctx.lineTo(player.x, player.y + PLAYER_H);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 3;
+      ctx.stroke();
     }
 
     function draw() {
@@ -934,8 +958,13 @@
         ctx.stroke();
       });
 
-      // player (turns orange while the super-bullet power-up is active)
-      drawSprite(PLAYER_SPRITE, player.x, player.y, PLAYER_CELL, powerupTimer > 0 ? "#ff8f3f" : "#3fd0ff");
+      // player ship - a plain arrow, flashes white on a hit and red fast right before it's destroyed
+      if (!playerDestroyed) {
+        var shipColor = powerupTimer > 0 ? "#ff8f3f" : "#3fd0ff";
+        if (playerFlash > 0 && Math.floor(playerFlash / 4) % 2 === 0) shipColor = "#fff";
+        if (playerDeathFlash > 0 && Math.floor(playerDeathFlash / 2) % 2 === 0) shipColor = "#ff3b3b";
+        drawShip(shipColor);
+      }
 
       // charged mini-beam preview, sitting on the tip of the ship until you fire
       if (beamCharged) {
@@ -969,7 +998,7 @@
       });
 
       // aim reticle - follows the mouse, click an invader to snipe it
-      if (mouse.active && state === "playing") {
+      if (mouse.active) {
         var r = 22;
         ctx.strokeStyle = "#ff5f5f";
         ctx.lineWidth = 2.5;
