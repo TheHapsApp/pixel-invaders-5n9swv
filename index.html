@@ -169,9 +169,30 @@
     .ctrlGroup.p1 .ctrlBtn { background: rgba(63,208,255,0.4); }
     .ctrlGroup.p2 .ctrlBtn { background: rgba(196,110,255,0.4); }
     .ctrlBtn.fireBtn { background: rgba(255,143,63,0.55) !important; }
+
+    #secretTestBtn {
+      position: fixed;
+      top: 6px;
+      left: 6px;
+      z-index: 50;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.2);
+      font-size: 0.75rem;
+      line-height: 20px;
+      text-align: center;
+      cursor: pointer;
+      padding: 0;
+    }
+    #secretTestBtn:hover { background: rgba(255,255,255,0.3); color: #fff; }
   </style>
 </head>
 <body>
+  <button id="secretTestBtn" title="test 2P join">🤖</button>
+
   <h1>👾 Pixel Invaders!</h1>
   <p class="sub">← → or A/D to move · S to shoot · aim with your mouse and click to snipe!</p>
 
@@ -254,6 +275,7 @@
     var ctx = canvas.getContext("2d");
 
     var playerCount = 1;
+    var p2AutoPilot = false; // secret test mode: player 2 is driven by a simple bot
 
     var player = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
     var keys = {};
@@ -578,6 +600,24 @@
       playShootSound();
     }
 
+    // secret test mode: a simple bot drifts toward the nearest invader and fires now and then
+    function runP2AutoPilot() {
+      if (invaders.length === 0) {
+        keys2["ArrowLeft"] = false; keys2["ArrowRight"] = false; keys2["s"] = false;
+        return;
+      }
+      var target = invaders[0], bestDist = Infinity;
+      for (var ai = 0; ai < invaders.length; ai++) {
+        var d = Math.abs((invaders[ai].x + invaders[ai].w / 2) - (player2.x + PLAYER_W / 2));
+        if (d < bestDist) { bestDist = d; target = invaders[ai]; }
+      }
+      var targetCx = target.x + target.w / 2;
+      var myCx = player2.x + PLAYER_W / 2;
+      keys2["ArrowLeft"] = targetCx < myCx - 6;
+      keys2["ArrowRight"] = targetCx > myCx + 6;
+      keys2["s"] = Math.random() < 0.08;
+    }
+
     function maybeFireEnemy() {
       if (state !== "playing") return;
       if (enemyBullets.length >= 7) return;
@@ -757,6 +797,7 @@
 
       // player 2 (co-op only)
       if (playerCount === 2) {
+        if (p2AutoPilot && !playerDestroyed2) runP2AutoPilot();
         if (playerDeathFlash2 > 0) {
           playerDeathFlash2--;
           if (playerDeathFlash2 <= 0) {
@@ -1257,6 +1298,11 @@
     document.getElementById("coopBtn").addEventListener("click", showJoinPrompt);
     document.getElementById("joinBtn").addEventListener("click", function () { startGame(2); });
     document.getElementById("playAgainBtn").addEventListener("click", function () { startGame(); });
+
+    document.getElementById("secretTestBtn").addEventListener("click", function () {
+      p2AutoPilot = true;
+      startGame(2);
+    });
 
     // on-screen touch/click controls - hold to move or fire, works for mobile and desktop alike
     function bindHoldButton(id, keyObj, keyName) {
