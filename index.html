@@ -182,9 +182,9 @@
     var animFrame = 0, animTimer = 0;
 
     var TIERS = [
-      { size: 1, cell: 4, color: "#5fff8f", points: 40, next: -1, splitCount: 0 },
-      { size: 2, cell: 5, color: "#ffd23f", points: 20, next: 0,  splitCount: 2 },
-      { size: 3, cell: 7, color: "#ff6fb0", points: 10, next: 1,  splitCount: 2 }
+      { size: 1, cell: 5,   color: "#5fff8f", points: 40, next: -1, splitCount: 0 },
+      { size: 2, cell: 6.5, color: "#ffd23f", points: 20, next: 0,  splitCount: 2 },
+      { size: 3, cell: 9,   color: "#ff6fb0", points: 10, next: 1,  splitCount: 2 }
     ];
 
     var canvas = document.getElementById("game");
@@ -997,14 +997,36 @@
         ctx.globalAlpha = 1;
       });
 
-      // aim reticle - follows the mouse, click an invader to snipe it
+      // aim reticle - a magnifying-glass lens (no handle) that follows the mouse
       if (mouse.active) {
-        var r = 22;
-        ctx.strokeStyle = "#ff5f5f";
-        ctx.lineWidth = 2.5;
+        var r = 24;
+
+        // glassy lens fill
+        var lensGrad = ctx.createRadialGradient(
+          mouse.x - r * 0.3, mouse.y - r * 0.3, 2,
+          mouse.x, mouse.y, r
+        );
+        lensGrad.addColorStop(0, "rgba(255,255,255,0.32)");
+        lensGrad.addColorStop(1, "rgba(63,208,255,0.1)");
         ctx.beginPath();
         ctx.arc(mouse.x, mouse.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = lensGrad;
+        ctx.fill();
+
+        // lens rim
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
         ctx.stroke();
+
+        // little glass glint
+        ctx.beginPath();
+        ctx.arc(mouse.x - r * 0.35, mouse.y - r * 0.35, r * 0.22, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.fill();
+
+        // decorative tick marks around the lens
+        ctx.strokeStyle = "#ff5f5f";
+        ctx.lineWidth = 2.5;
         [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(function (d) {
           ctx.beginPath();
           ctx.moveTo(mouse.x + d[0] * (r + 4), mouse.y + d[1] * (r + 4));
