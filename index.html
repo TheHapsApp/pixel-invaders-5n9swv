@@ -171,6 +171,35 @@
       margin: 6px 0;
     }
     #lobbyRoster { margin: 8px 0; font-weight: bold; min-height: 1.4em; }
+
+    #notFoundIcon {
+      position: relative;
+      width: 110px;
+      height: 110px;
+      margin: 4px auto 10px;
+    }
+    #notFoundIcon .nfGlobe {
+      position: absolute;
+      inset: 0;
+      font-size: 4.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #notFoundIcon .nfGlass {
+      position: absolute;
+      right: -6px;
+      bottom: -4px;
+      font-size: 2.6rem;
+      transform: rotate(10deg);
+    }
+    #notFoundIcon .nfQuestion {
+      position: absolute;
+      top: -8px;
+      right: 2px;
+      font-size: 2rem;
+      text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+    }
     #joinCodeInput, #peopleCountInput {
       font-family: inherit;
       font-size: 1.5rem;
@@ -316,6 +345,15 @@
       </div>
       <div id="joinerWaiting" style="display:none;">
         <div class="small">✅ Connected! Waiting for the host to start...</div>
+      </div>
+      <div id="joinNotFound" style="display:none;">
+        <div id="notFoundIcon">
+          <span class="nfGlobe">🌍</span>
+          <span class="nfGlass">🔍</span>
+          <span class="nfQuestion">❓</span>
+        </div>
+        <div class="small">Couldn't find any people. Check the code and try again!</div>
+        <button class="btn" id="notFoundTryAgainBtn">🔙 Try Again</button>
       </div>
       <button class="btn" id="playAgainBtn" style="display:none;">🔄 Play Again</button>
     </div>
@@ -689,6 +727,7 @@
         if (existing) existing.color = p.color;
         else netRoster.push({ tempId: p.tempId, color: p.color });
         renderLobbyRoster();
+        netChannel.send({ type: "broadcast", event: "ack", payload: { tempId: p.tempId } });
       });
       netChannel.on("broadcast", { event: "input" }, function (msg) {
         var p = msg.payload;
@@ -770,12 +809,25 @@
       document.getElementById("joinerColorPick").style.display = "flex";
     }
 
+    var netAckReceived = false;
+    var netJoinRetryTimer = null;
+    var netJoinAttempts = 0;
+
     function joinerConnect() {
       isNetJoiner = true;
       isNetHost = false;
       netMyTempId = "p" + Math.random().toString(36).slice(2, 8);
+      netAckReceived = false;
+      netJoinAttempts = 0;
       var client = getSupabaseClient();
       netChannel = client.channel("game-" + joinerPendingCode);
+
+      netChannel.on("broadcast", { event: "ack" }, function (msg) {
+        if (msg.payload.tempId === netMyTempId) {
+          netAckReceived = true;
+          if (netJoinRetryTimer) { clearTimeout(netJoinRetryTimer); netJoinRetryTimer = null; }
+        }
+      });
 
       netChannel.on("broadcast", { event: "status" }, function (msg) {
         var mine = msg.payload.players.filter(function (pp) { return pp.tempId === netMyTempId; })[0];
@@ -803,11 +855,30 @@
 
       netChannel.subscribe(function (status) {
         if (status === "SUBSCRIBED") {
-          netChannel.send({ type: "broadcast", event: "join", payload: { tempId: netMyTempId, color: netJoinerColor } });
           hideAllOverlaySteps();
           document.getElementById("joinerWaiting").style.display = "flex";
+          sendJoinAttempt();
         }
       });
+    }
+
+    // the host might not exist yet (bad code, or they haven't created a lobby) -
+    // keep knocking a few times, and if nobody ever answers, say so
+    function sendJoinAttempt() {
+      netChannel.send({ type: "broadcast", event: "join", payload: { tempId: netMyTempId, color: netJoinerColor } });
+      netJoinAttempts++;
+      if (netJoinAttempts >= 4) {
+        if (!netAckReceived) showJoinNotFound();
+        return;
+      }
+      netJoinRetryTimer = setTimeout(function () {
+        if (!netAckReceived) sendJoinAttempt();
+      }, 1200);
+    }
+
+    function showJoinNotFound() {
+      hideAllOverlaySteps();
+      document.getElementById("joinNotFound").style.display = "flex";
     }
 
     function sendJoinerInput() {
@@ -1686,6 +1757,11 @@
     });
 
     document.getElementById("joinNetBtn").addEventListener("click", joinShowCodeEntry);
+    document.getElementById("notFoundTryAgainBtn").addEventListener("click", function () {
+      if (netJoinRetryTimer) { clearTimeout(netJoinRetryTimer); netJoinRetryTimer = null; }
+      netChannel = null;
+      joinShowCodeEntry();
+    });
     document.getElementById("joinCodeGoBtn").addEventListener("click", joinShowColorPick);
     document.getElementById("joinerJoinBtn").addEventListener("click", joinerConnect);
     bindJoinerHold("joinerLeftBtn", function (v) { netJoinerLeft = v; });
