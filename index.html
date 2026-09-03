@@ -1977,12 +1977,18 @@
     }
 
     var GAME_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d", "s"];
+    function isTypingIntoTextField() {
+      var el = document.activeElement;
+      return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+    }
     document.addEventListener("keydown", function (e) {
+      if (isTypingIntoTextField()) return; // let the browser type into chat/nickname boxes normally
       var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (GAME_KEYS.indexOf(k) !== -1) e.preventDefault();
       keys[k] = true;
     });
     document.addEventListener("keyup", function (e) {
+      if (isTypingIntoTextField()) return;
       var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       keys[k] = false;
     });
