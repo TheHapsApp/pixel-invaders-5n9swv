@@ -128,6 +128,47 @@
       box-shadow: 0 6px 0 rgba(0,0,0,0.3);
     }
     .btn:active { transform: translateY(3px); box-shadow: 0 3px 0 rgba(0,0,0,0.3); }
+
+    #modeButtons, #joinPrompt {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    #controls {
+      display: flex;
+      justify-content: space-between;
+      max-width: 900px;
+      margin: 16px auto 0;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .ctrlGroup {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 0 auto;
+    }
+    .ctrlBtn {
+      font-family: inherit;
+      font-weight: bold;
+      font-size: 1.7rem;
+      width: 60px;
+      height: 60px;
+      border-radius: 16px;
+      border: 3px solid #fff;
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 5px 0 rgba(0,0,0,0.3);
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .ctrlBtn:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,0.3); }
+    .ctrlGroup.p1 .ctrlBtn { background: rgba(63,208,255,0.4); }
+    .ctrlGroup.p2 .ctrlBtn { background: rgba(196,110,255,0.4); }
+    .ctrlBtn.fireBtn { background: rgba(255,143,63,0.55) !important; }
   </style>
 </head>
 <body>
@@ -138,6 +179,7 @@
     <span id="scoreLbl">Score: 0</span>
     <span id="aliveLbl">Invaders: 0</span>
     <span id="livesLbl">❤️❤️❤️</span>
+    <span id="lives2Lbl" style="display:none;">💜💜💜</span>
   </div>
 
   <div id="itemTimers">
@@ -152,9 +194,30 @@
     <div id="overlayMsg">
       <div class="big" id="overlayBig">👾 Pixel Invaders!</div>
       <div class="small" id="overlaySmall">Bigger invaders break into smaller ones when you shoot them. Don't let them reach the bottom!</div>
-      <button class="btn" id="startBtn">▶️ Start Game</button>
+      <div id="modeButtons">
+        <button class="btn" id="soloBtn">🧍 Play Solo</button>
+        <button class="btn" id="coopBtn">👥 Play with a Friend</button>
+      </div>
+      <div id="joinPrompt" style="display:none;">
+        <div class="small">Player 2, tap below when you're ready!</div>
+        <button class="btn" id="joinBtn">🙋 Tap to Join!</button>
+      </div>
+      <button class="btn" id="playAgainBtn" style="display:none;">🔄 Play Again</button>
     </div>
     <div id="megaMsg">🌈 ULTIMATE BOMB!<br>All Clear!</div>
+  </div>
+
+  <div id="controls">
+    <div class="ctrlGroup p1" id="p1Controls">
+      <button class="ctrlBtn" id="p1LeftBtn">◀</button>
+      <button class="ctrlBtn fireBtn" id="p1FireBtn">🔥</button>
+      <button class="ctrlBtn" id="p1RightBtn">▶</button>
+    </div>
+    <div class="ctrlGroup p2" id="p2Controls" style="display:none;">
+      <button class="ctrlBtn" id="p2LeftBtn">◀</button>
+      <button class="ctrlBtn fireBtn" id="p2FireBtn">🔥</button>
+      <button class="ctrlBtn" id="p2RightBtn">▶</button>
+    </div>
   </div>
 
   <script>
@@ -190,12 +253,22 @@
     var canvas = document.getElementById("game");
     var ctx = canvas.getContext("2d");
 
+    var playerCount = 1;
+
     var player = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
     var keys = {};
     var mouse = { x: CANVAS_W / 2, y: CANVAS_H / 2, active: false };
     var playerBullets = [];
     var FIRE_COOLDOWN_FRAMES = 8;
     var fireCooldown = 0;
+
+    var player2 = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
+    var keys2 = {};
+    var fireCooldown2 = 0;
+    var lives2 = 3;
+    var playerFlash2 = 0;
+    var playerDeathFlash2 = 0;
+    var playerDestroyed2 = false;
     var enemyBullets = [];
     var invaders = [];
     var particles = [];
@@ -311,6 +384,7 @@
       document.getElementById("scoreLbl").textContent = "Score: " + score;
       document.getElementById("aliveLbl").textContent = "Invaders: " + invaders.length;
       document.getElementById("livesLbl").textContent = "❤️".repeat(Math.max(0, lives));
+      document.getElementById("lives2Lbl").textContent = "💜".repeat(Math.max(0, lives2));
     }
 
     function fmtSeconds(frames) {
@@ -342,11 +416,27 @@
     function showOverlay(big, small, showStart) {
       document.getElementById("overlayBig").textContent = big;
       document.getElementById("overlaySmall").textContent = small || "";
-      document.getElementById("startBtn").style.display = showStart ? "inline-block" : "none";
+      document.getElementById("modeButtons").style.display = "none";
+      document.getElementById("joinPrompt").style.display = "none";
+      document.getElementById("playAgainBtn").style.display = showStart ? "inline-block" : "none";
       document.getElementById("overlayMsg").style.display = "flex";
     }
     function hideOverlay() {
       document.getElementById("overlayMsg").style.display = "none";
+    }
+
+    function showModeSelect() {
+      document.getElementById("overlayBig").textContent = "👾 Pixel Invaders!";
+      document.getElementById("overlaySmall").textContent = "Bigger invaders break into smaller ones when you shoot them. Don't let them reach the bottom!";
+      document.getElementById("modeButtons").style.display = "flex";
+      document.getElementById("joinPrompt").style.display = "none";
+      document.getElementById("playAgainBtn").style.display = "none";
+      document.getElementById("overlayMsg").style.display = "flex";
+    }
+
+    function showJoinPrompt() {
+      document.getElementById("modeButtons").style.display = "none";
+      document.getElementById("joinPrompt").style.display = "flex";
     }
 
     function randomTier() {
@@ -370,13 +460,16 @@
       return { tier: tier, kind: kind, x: x, y: y, w: size, h: size };
     }
 
-    function startGame() {
+    function startGame(count) {
+      if (count) playerCount = count;
+
       var ctx = getAudioCtx();
       if (ctx.state === "suspended") ctx.resume();
 
-      score = 0; lives = 3;
+      score = 0; lives = 3; lives2 = 3;
       playerBullets = [];
       fireCooldown = 0;
+      fireCooldown2 = 0;
       enemyBullets = [];
       particles = [];
       invaders = [];
@@ -401,7 +494,19 @@
       playerFlash = 0;
       playerDeathFlash = 0;
       playerDestroyed = false;
-      player.x = CANVAS_W / 2 - PLAYER_W / 2;
+      playerFlash2 = 0;
+      playerDeathFlash2 = 0;
+      playerDestroyed2 = false;
+
+      if (playerCount === 2) {
+        player.x = CANVAS_W / 2 - PLAYER_W - 20;
+        player2.x = CANVAS_W / 2 + 20;
+      } else {
+        player.x = CANVAS_W / 2 - PLAYER_W / 2;
+      }
+      document.getElementById("p2Controls").style.display = playerCount === 2 ? "flex" : "none";
+      document.getElementById("lives2Lbl").style.display = playerCount === 2 ? "inline" : "none";
+
       for (var s0 = 0; s0 < 7; s0++) spawnOneInvader();
       spawnTimer = 30;
       updateStatBar();
@@ -452,6 +557,23 @@
         });
       } else {
         playerBullets.push({ x: player.x + PLAYER_W / 2 - 3.5, y: player.y - 4, w: 7, h: 18 });
+      }
+      playShootSound();
+    }
+
+    // player 2 shares the same power-ups as player 1 - it's a team effort
+    function firePlayer2Bullet() {
+      if (beamCharged) {
+        sweepBeam = { x: 0, speed: SWEEP_SPEED };
+        beamCharged = false;
+      } else if (powerupTimer > 0) {
+        playerBullets.push({
+          x: player2.x + PLAYER_W / 2 - SUPER_BULLET_W / 2,
+          y: player2.y - SUPER_BULLET_H,
+          w: SUPER_BULLET_W, h: SUPER_BULLET_H, super: true
+        });
+      } else {
+        playerBullets.push({ x: player2.x + PLAYER_W / 2 - 3.5, y: player2.y - 4, w: 7, h: 18 });
       }
       playShootSound();
     }
@@ -575,11 +697,19 @@
       lives--;
       updateStatBar();
       if (lives <= 0) {
-        playerDeathFlash = 36; // fast flash, then the ship disappears and the game ends
+        playerDeathFlash = 36; // fast flash, then the ship disappears
       } else {
-        playerBullets = [];
-        enemyBullets = [];
-        player.x = CANVAS_W / 2 - PLAYER_W / 2;
+        player.x = playerCount === 2 ? CANVAS_W / 2 - PLAYER_W - 20 : CANVAS_W / 2 - PLAYER_W / 2;
+      }
+    }
+
+    function loseLife2() {
+      lives2--;
+      updateStatBar();
+      if (lives2 <= 0) {
+        playerDeathFlash2 = 36; // fast flash, then the ship disappears
+      } else {
+        player2.x = CANVAS_W / 2 + 20;
       }
     }
 
@@ -590,35 +720,63 @@
         won ? "Final score: " + score : "The invaders got through! Final score: " + score,
         true
       );
-      document.getElementById("startBtn").textContent = "🔄 Play Again";
+    }
+
+    function checkGameOver() {
+      if (playerCount === 1) {
+        if (playerDestroyed) endGame(false);
+      } else if (playerDestroyed && playerDestroyed2) {
+        endGame(false);
+      }
     }
 
     function update() {
       if (state !== "playing") return;
 
+      animTimer++;
+      if (animTimer >= 18) { animTimer = 0; animFrame = 1 - animFrame; }
+
+      // player 1
       if (playerDeathFlash > 0) {
         playerDeathFlash--;
         if (playerDeathFlash <= 0) {
           playerDestroyed = true;
-          endGame(false);
+          checkGameOver();
         }
-        return; // freeze the action while the ship flashes out
+      } else if (!playerDestroyed) {
+        if (playerFlash > 0) playerFlash--;
+        if (keys["ArrowLeft"] || keys["a"]) player.x -= PLAYER_SPEED;
+        if (keys["ArrowRight"] || keys["d"]) player.x += PLAYER_SPEED;
+        player.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, player.x));
+        if (fireCooldown > 0) fireCooldown--;
+        if (keys["s"] && fireCooldown <= 0) {
+          firePlayerBullet();
+          fireCooldown = FIRE_COOLDOWN_FRAMES;
+        }
       }
 
-      if (playerFlash > 0) playerFlash--;
-
-      animTimer++;
-      if (animTimer >= 18) { animTimer = 0; animFrame = 1 - animFrame; }
-
-      if (keys["ArrowLeft"] || keys["a"]) player.x -= PLAYER_SPEED;
-      if (keys["ArrowRight"] || keys["d"]) player.x += PLAYER_SPEED;
-      player.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, player.x));
-
-      if (fireCooldown > 0) fireCooldown--;
-      if (keys["s"] && fireCooldown <= 0) {
-        firePlayerBullet();
-        fireCooldown = FIRE_COOLDOWN_FRAMES;
+      // player 2 (co-op only)
+      if (playerCount === 2) {
+        if (playerDeathFlash2 > 0) {
+          playerDeathFlash2--;
+          if (playerDeathFlash2 <= 0) {
+            playerDestroyed2 = true;
+            checkGameOver();
+          }
+        } else if (!playerDestroyed2) {
+          if (playerFlash2 > 0) playerFlash2--;
+          if (keys2["ArrowLeft"]) player2.x -= PLAYER_SPEED;
+          if (keys2["ArrowRight"]) player2.x += PLAYER_SPEED;
+          player2.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, player2.x));
+          if (fireCooldown2 > 0) fireCooldown2--;
+          if (keys2["s"] && fireCooldown2 <= 0) {
+            firePlayer2Bullet();
+            fireCooldown2 = FIRE_COOLDOWN_FRAMES;
+          }
+        }
       }
+
+      if (state !== "playing") return; // a checkGameOver() above may have just ended it
 
       // count down each invader's brief post-split spawn immunity
       for (var g = 0; g < invaders.length; g++) {
@@ -811,13 +969,16 @@
           enemyBullets.splice(i, 1);
           continue;
         }
-        var playerRect = { x: player.x, y: player.y, w: PLAYER_W, h: PLAYER_H };
-        if (rectsOverlap(b, playerRect)) {
-          var hitX = b.x + b.w / 2, hitY = b.y + b.h / 2;
-          enemyBullets.splice(i, 1);
-          spawnParticles(hitX, hitY, "#ff8f3f");
+        if (!playerDestroyed && rectsOverlap(b, { x: player.x, y: player.y, w: PLAYER_W, h: PLAYER_H })) {
+          spawnParticles(b.x + b.w / 2, b.y + b.h / 2, "#ff8f3f");
           playerFlash = 20;
           loseLife();
+          enemyBullets.splice(i, 1);
+        } else if (playerCount === 2 && !playerDestroyed2 && rectsOverlap(b, { x: player2.x, y: player2.y, w: PLAYER_W, h: PLAYER_H })) {
+          spawnParticles(b.x + b.w / 2, b.y + b.h / 2, "#ff8f3f");
+          playerFlash2 = 20;
+          loseLife2();
+          enemyBullets.splice(i, 1);
         }
       }
       maybeFireEnemy();
@@ -851,12 +1012,12 @@
       }
     }
 
-    function drawShip(color) {
-      var cx = player.x + PLAYER_W / 2;
+    function drawShip(p, color) {
+      var cx = p.x + PLAYER_W / 2;
       ctx.beginPath();
-      ctx.moveTo(cx, player.y);
-      ctx.lineTo(player.x + PLAYER_W, player.y + PLAYER_H);
-      ctx.lineTo(player.x, player.y + PLAYER_H);
+      ctx.moveTo(cx, p.y);
+      ctx.lineTo(p.x + PLAYER_W, p.y + PLAYER_H);
+      ctx.lineTo(p.x, p.y + PLAYER_H);
       ctx.closePath();
       ctx.fillStyle = color;
       ctx.fill();
@@ -958,12 +1119,18 @@
         ctx.stroke();
       });
 
-      // player ship - a plain arrow, flashes white on a hit and red fast right before it's destroyed
+      // player ship(s) - plain arrows, flash white on a hit and red fast right before destroyed
       if (!playerDestroyed) {
         var shipColor = powerupTimer > 0 ? "#ff8f3f" : "#3fd0ff";
         if (playerFlash > 0 && Math.floor(playerFlash / 4) % 2 === 0) shipColor = "#fff";
         if (playerDeathFlash > 0 && Math.floor(playerDeathFlash / 2) % 2 === 0) shipColor = "#ff3b3b";
-        drawShip(shipColor);
+        drawShip(player, shipColor);
+      }
+      if (playerCount === 2 && !playerDestroyed2) {
+        var shipColor2 = powerupTimer > 0 ? "#ff8f3f" : "#c46eff";
+        if (playerFlash2 > 0 && Math.floor(playerFlash2 / 4) % 2 === 0) shipColor2 = "#fff";
+        if (playerDeathFlash2 > 0 && Math.floor(playerDeathFlash2 / 2) % 2 === 0) shipColor2 = "#ff3b3b";
+        drawShip(player2, shipColor2);
       }
 
       // charged mini-beam preview, sitting on the tip of the ship until you fire
@@ -1086,7 +1253,25 @@
       }
     });
 
-    document.getElementById("startBtn").addEventListener("click", startGame);
+    document.getElementById("soloBtn").addEventListener("click", function () { startGame(1); });
+    document.getElementById("coopBtn").addEventListener("click", showJoinPrompt);
+    document.getElementById("joinBtn").addEventListener("click", function () { startGame(2); });
+    document.getElementById("playAgainBtn").addEventListener("click", function () { startGame(); });
+
+    // on-screen touch/click controls - hold to move or fire, works for mobile and desktop alike
+    function bindHoldButton(id, keyObj, keyName) {
+      var el = document.getElementById(id);
+      el.addEventListener("pointerdown", function (e) { e.preventDefault(); keyObj[keyName] = true; });
+      el.addEventListener("pointerup", function () { keyObj[keyName] = false; });
+      el.addEventListener("pointerleave", function () { keyObj[keyName] = false; });
+      el.addEventListener("pointercancel", function () { keyObj[keyName] = false; });
+    }
+    bindHoldButton("p1LeftBtn", keys, "ArrowLeft");
+    bindHoldButton("p1RightBtn", keys, "ArrowRight");
+    bindHoldButton("p1FireBtn", keys, "s");
+    bindHoldButton("p2LeftBtn", keys2, "ArrowLeft");
+    bindHoldButton("p2RightBtn", keys2, "ArrowRight");
+    bindHoldButton("p2FireBtn", keys2, "s");
 
     updateStatBar();
     draw();
