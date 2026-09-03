@@ -163,6 +163,44 @@
       box-shadow: 0 0 0 3px rgba(255,255,255,0.5);
     }
 
+    #lobbyCode {
+      font-size: clamp(2.2rem, 10vw, 3.2rem);
+      font-weight: bold;
+      letter-spacing: 0.15em;
+      text-shadow: 0 0 12px #3fd0ff, 2px 2px 0 rgba(0,0,0,0.4);
+      margin: 6px 0;
+    }
+    #lobbyRoster { margin: 8px 0; font-weight: bold; min-height: 1.4em; }
+    #joinCodeInput, #peopleCountInput {
+      font-family: inherit;
+      font-size: 1.5rem;
+      font-weight: bold;
+      text-align: center;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      width: 140px;
+      padding: 8px;
+      border-radius: 12px;
+      border: 3px solid #fff;
+      margin: 6px 0;
+    }
+
+    #joinerScreen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      background: linear-gradient(120deg, #1a0a3a, #3a0a5a, #0a1a4a);
+      color: #fff;
+      text-align: center;
+      padding: 20px;
+    }
+    #joinerScreen .ctrlBtn { width: 90px; height: 90px; font-size: 2.4rem; }
+
     #controls {
       display: flex;
       justify-content: space-between;
@@ -242,10 +280,12 @@
       <div id="modeButtons">
         <button class="btn" id="soloBtn">🧍 Play Solo</button>
         <button class="btn" id="coopBtn">👥 Play with a Friend</button>
+        <button class="btn" id="joinNetBtn">🔗 Join a Friend's Game</button>
       </div>
       <div id="friendChoice" style="display:none;">
         <button class="btn" id="computerBtn">🤖 Play with a Computer</button>
-        <button class="btn" id="peopleBtn">🧑‍🤝‍🧑 Play with People</button>
+        <button class="btn" id="peopleBtn">📱 Same Screen</button>
+        <button class="btn" id="netHostBtn">🌐 Different Devices</button>
       </div>
       <div id="peopleCountPrompt" style="display:none;">
         <div class="small">How many people are playing?</div>
@@ -257,6 +297,26 @@
         <div id="colorPickRows"></div>
         <button class="btn" id="colorStartBtn">▶️ Start!</button>
       </div>
+      <div id="hostLobby" style="display:none;">
+        <div class="small">Tell your friends this code:</div>
+        <div id="lobbyCode"></div>
+        <div class="small">Waiting for friends to join...</div>
+        <div id="lobbyRoster"></div>
+        <button class="btn" id="lobbyStartBtn">▶️ Start Game!</button>
+      </div>
+      <div id="joinCodeEntry" style="display:none;">
+        <div class="small">Enter your friend's code:</div>
+        <input type="text" id="joinCodeInput" maxlength="4" placeholder="ABCD">
+        <button class="btn" id="joinCodeGoBtn">▶️ Next</button>
+      </div>
+      <div id="joinerColorPick" style="display:none;">
+        <div class="small">Pick your color!</div>
+        <div id="joinerSwatchRow" class="swatchRow"></div>
+        <button class="btn" id="joinerJoinBtn">🙋 Join!</button>
+      </div>
+      <div id="joinerWaiting" style="display:none;">
+        <div class="small">✅ Connected! Waiting for the host to start...</div>
+      </div>
       <button class="btn" id="playAgainBtn" style="display:none;">🔄 Play Again</button>
     </div>
     <div id="megaMsg">🌈 ULTIMATE BOMB!<br>All Clear!</div>
@@ -264,6 +324,17 @@
 
   <div id="controls"></div>
 
+  <div id="joinerScreen">
+    <h1 id="joinerTitle">🕹️ Player</h1>
+    <div id="joinerStatus" class="small">Connecting...</div>
+    <div id="joinerCtrlGroup" class="ctrlGroup" style="display:none;">
+      <button class="ctrlBtn" id="joinerLeftBtn">◀</button>
+      <button class="ctrlBtn fireBtn" id="joinerFireBtn">🔥</button>
+      <button class="ctrlBtn" id="joinerRightBtn">▶</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script>
     var CANVAS_W = 900, CANVAS_H = 750;
     var PLAYER_CELL = 5;
@@ -280,6 +351,32 @@
       { name: "Red",    hex: "#ff5f5f" }
     ];
     var BOT_COLOR = "#ff5f5f";
+
+    // realtime signaling for different-device play - a dedicated, isolated
+    // Supabase project used only for passing tiny join/input/status messages
+    var SUPABASE_URL = "https://qijdkklkfjdtqdughqhl.supabase.co";
+    var SUPABASE_KEY = "sb_publishable_QVpwACsn56Lr6TlqRNHKSA_8ak9IzBu";
+    var supabaseClient = null;
+    function getSupabaseClient() {
+      if (!supabaseClient) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      return supabaseClient;
+    }
+
+    var netChannel = null;
+    var netRoomCode = null;
+    var isNetHost = false;
+    var isNetJoiner = false;
+    var netRoster = [];        // host-side: [{tempId, color}]
+    var netMyTempId = null;    // joiner-side: my own id
+    var netJoinerColor = null;
+    var netJoinerLeft = false, netJoinerRight = false, netJoinerFire = false;
+
+    function makeRoomCode() {
+      var chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      var s = "";
+      for (var i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+      return s;
+    }
 
     var SPRITES = [
       ["00100100","00111100","01111110","11011011","11111111","00100100","01011010","10100101"],
@@ -461,7 +558,11 @@
       else { blueLbl.textContent = fmtSeconds(blueDelay + blueTimer); blueBadge.classList.remove("ready"); }
     }
 
-    var OVERLAY_STEPS = ["modeButtons", "friendChoice", "peopleCountPrompt", "colorPick", "playAgainBtn"];
+    var OVERLAY_STEPS = [
+      "modeButtons", "friendChoice", "peopleCountPrompt", "colorPick",
+      "hostLobby", "joinCodeEntry", "joinerColorPick", "joinerWaiting",
+      "playAgainBtn"
+    ];
     function hideAllOverlaySteps() {
       OVERLAY_STEPS.forEach(function (id) {
         document.getElementById(id).style.display = "none";
@@ -500,6 +601,7 @@
     var pendingColors = [];
     var pendingPlayerCount = 1;
     var pendingBotMode = false;
+    var colorPickPurpose = "start"; // "start" = begin the game now, "host" = create a network lobby instead
     function showColorPickScreen(count, botMode) {
       pendingPlayerCount = count;
       pendingBotMode = botMode;
@@ -572,6 +674,158 @@
       showBigMessage(label + "<br>" + remText, 1800);
     }
 
+    // ---- different-device play: host side ----
+    // the host device runs the real game; joined phones just send button presses
+    function hostCreateLobby() {
+      isNetHost = true;
+      isNetJoiner = false;
+      netRoomCode = makeRoomCode();
+      netRoster = [];
+      var client = getSupabaseClient();
+      netChannel = client.channel("game-" + netRoomCode);
+      netChannel.on("broadcast", { event: "join" }, function (msg) {
+        var p = msg.payload;
+        var existing = netRoster.filter(function (r) { return r.tempId === p.tempId; })[0];
+        if (existing) existing.color = p.color;
+        else netRoster.push({ tempId: p.tempId, color: p.color });
+        renderLobbyRoster();
+      });
+      netChannel.on("broadcast", { event: "input" }, function (msg) {
+        var p = msg.payload;
+        var pl = players.filter(function (pp) { return pp.netId === p.tempId; })[0];
+        if (pl && !pl.destroyed) {
+          pl.keys["ArrowLeft"] = !!p.left;
+          pl.keys["ArrowRight"] = !!p.right;
+          pl.keys["s"] = !!p.fire;
+        }
+      });
+      netChannel.subscribe(function (status) {
+        if (status === "SUBSCRIBED") {
+          document.getElementById("lobbyCode").textContent = netRoomCode;
+          renderLobbyRoster();
+        }
+      });
+      hideAllOverlaySteps();
+      document.getElementById("hostLobby").style.display = "flex";
+    }
+
+    function renderLobbyRoster() {
+      var el = document.getElementById("lobbyRoster");
+      if (netRoster.length === 0) { el.textContent = "Nobody has joined yet."; return; }
+      el.innerHTML = netRoster.map(function (r, i) {
+        return '<span style="color:' + r.color + '">Player ' + (i + 2) + ' joined!</span>';
+      }).join("<br>");
+    }
+
+    function hostStartNetworkedGame() {
+      var count = 1 + netRoster.length;
+      var colors = [pendingColors[0] || COLOR_PALETTE[0].hex].concat(netRoster.map(function (r) { return r.color; }));
+      var netIds = [null].concat(netRoster.map(function (r) { return r.tempId; }));
+      startGame(count, false, colors, netIds);
+      netChannel.send({ type: "broadcast", event: "start", payload: {} });
+    }
+
+    var netStatusTimer = 0;
+    function sendHostStatus() {
+      if (!isNetHost || !netChannel) return;
+      netStatusTimer++;
+      if (netStatusTimer < 15) return;
+      netStatusTimer = 0;
+      var netPlayers = players.filter(function (p) { return p.netId; }).map(function (p) {
+        return { tempId: p.netId, lives: p.lives, destroyed: p.destroyed, score: score };
+      });
+      netChannel.send({ type: "broadcast", event: "status", payload: { players: netPlayers, gameOver: state === "gameover" } });
+    }
+
+    // ---- different-device play: joiner side ----
+    // the joiner's phone never runs the game itself - it's just a remote controller
+    var joinerPendingCode = null;
+
+    function joinShowCodeEntry() {
+      hideAllOverlaySteps();
+      document.getElementById("joinCodeInput").value = "";
+      document.getElementById("joinCodeEntry").style.display = "flex";
+    }
+
+    function joinShowColorPick() {
+      var code = document.getElementById("joinCodeInput").value.trim().toUpperCase();
+      if (!code) return;
+      joinerPendingCode = code;
+      netJoinerColor = COLOR_PALETTE[0].hex;
+      var row = document.getElementById("joinerSwatchRow");
+      row.innerHTML = "";
+      COLOR_PALETTE.forEach(function (c) {
+        var sw = document.createElement("button");
+        sw.className = "swatchBtn";
+        sw.style.background = c.hex;
+        sw.addEventListener("click", function () {
+          netJoinerColor = c.hex;
+          var all = row.querySelectorAll(".swatchBtn");
+          for (var i = 0; i < all.length; i++) all[i].classList.remove("selected");
+          sw.classList.add("selected");
+        });
+        row.appendChild(sw);
+      });
+      hideAllOverlaySteps();
+      document.getElementById("joinerColorPick").style.display = "flex";
+    }
+
+    function joinerConnect() {
+      isNetJoiner = true;
+      isNetHost = false;
+      netMyTempId = "p" + Math.random().toString(36).slice(2, 8);
+      var client = getSupabaseClient();
+      netChannel = client.channel("game-" + joinerPendingCode);
+
+      netChannel.on("broadcast", { event: "status" }, function (msg) {
+        var mine = msg.payload.players.filter(function (pp) { return pp.tempId === netMyTempId; })[0];
+        if (mine) {
+          document.getElementById("joinerStatus").textContent =
+            (mine.destroyed ? "💥 You're out! " : "❤️".repeat(Math.max(0, mine.lives)) + " ") + "Score: " + mine.score;
+        }
+        if (msg.payload.gameOver) {
+          document.getElementById("joinerStatus").textContent =
+            "🏁 Game Over! Final score: " + (mine ? mine.score : "?");
+          document.getElementById("joinerCtrlGroup").style.display = "none";
+        }
+      });
+
+      netChannel.on("broadcast", { event: "start" }, function () {
+        document.getElementById("overlayMsg").style.display = "none";
+        document.getElementById("statBar").style.display = "none";
+        document.getElementById("itemTimers").style.display = "none";
+        document.getElementById("gameWrap").style.display = "none";
+        document.getElementById("controls").style.display = "none";
+        document.getElementById("joinerScreen").style.display = "flex";
+        document.getElementById("joinerStatus").textContent = "You're in! ❤️❤️❤️";
+        document.getElementById("joinerCtrlGroup").style.display = "flex";
+      });
+
+      netChannel.subscribe(function (status) {
+        if (status === "SUBSCRIBED") {
+          netChannel.send({ type: "broadcast", event: "join", payload: { tempId: netMyTempId, color: netJoinerColor } });
+          hideAllOverlaySteps();
+          document.getElementById("joinerWaiting").style.display = "flex";
+        }
+      });
+    }
+
+    function sendJoinerInput() {
+      if (!netChannel) return;
+      netChannel.send({
+        type: "broadcast", event: "input",
+        payload: { tempId: netMyTempId, left: netJoinerLeft, right: netJoinerRight, fire: netJoinerFire }
+      });
+    }
+
+    function bindJoinerHold(id, setFn) {
+      var el = document.getElementById(id);
+      el.addEventListener("pointerdown", function (e) { e.preventDefault(); setFn(true); sendJoinerInput(); });
+      el.addEventListener("pointerup", function () { setFn(false); sendJoinerInput(); });
+      el.addEventListener("pointerleave", function () { setFn(false); sendJoinerInput(); });
+      el.addEventListener("pointercancel", function () { setFn(false); sendJoinerInput(); });
+    }
+
     function randomTier() {
       var r = Math.random();
       if (r < 0.4) return 2;  // big, pink
@@ -593,10 +847,11 @@
       return { tier: tier, kind: kind, x: x, y: y, w: size, h: size };
     }
 
-    function startGame(count, botMode, colors) {
+    function startGame(count, botMode, colors, netIds) {
       if (count) playerCount = count;
       var useBotMode = !!botMode;
       var useColors = colors || pendingColors;
+      var useNetIds = netIds || [];
 
       var ctx = getAudioCtx();
       if (ctx.state === "suspended") ctx.resume();
@@ -642,6 +897,7 @@
           lives: 3, flash: 0, deathFlash: 0, destroyed: false,
           color: (useColors && useColors[pi]) || (isBot ? BOT_COLOR : COLOR_PALETTE[pi % COLOR_PALETTE.length].hex),
           isBot: isBot,
+          netId: useNetIds[pi] || null,
           num: pi + 1
         });
       }
@@ -660,7 +916,7 @@
       var wrap = document.getElementById("controls");
       wrap.innerHTML = "";
       players.forEach(function (pl) {
-        if (pl.isBot) return; // bots don't need on-screen buttons
+        if (pl.isBot || pl.netId) return; // bots and remote players don't need local on-screen buttons
         var group = document.createElement("div");
         group.className = "ctrlGroup";
         var left = document.createElement("button");
@@ -1142,6 +1398,7 @@
       }
 
       updateItemTimers();
+      sendHostStatus();
     }
 
     function drawSprite(pattern, x, y, cell, color) {
@@ -1392,26 +1649,51 @@
     });
 
     document.getElementById("soloBtn").addEventListener("click", function () {
+      isNetHost = false; isNetJoiner = false;
       pendingPlayerCount = 1; pendingBotMode = false; pendingColors = [COLOR_PALETTE[0].hex];
       startGame(1, false, pendingColors);
     });
     document.getElementById("coopBtn").addEventListener("click", showFriendChoice);
-    document.getElementById("computerBtn").addEventListener("click", function () { showColorPickScreen(2, true); });
+    document.getElementById("computerBtn").addEventListener("click", function () {
+      isNetHost = false; isNetJoiner = false;
+      colorPickPurpose = "start";
+      showColorPickScreen(2, true);
+    });
     document.getElementById("peopleBtn").addEventListener("click", showPeopleCountPrompt);
     document.getElementById("peopleCountGoBtn").addEventListener("click", function () {
       var n = parseInt(document.getElementById("peopleCountInput").value, 10);
       if (!n || n < 1) n = 1;
       if (n > 4) n = 4;
+      isNetHost = false; isNetJoiner = false;
+      colorPickPurpose = "start";
       showColorPickScreen(n, false);
     });
-    document.getElementById("colorStartBtn").addEventListener("click", function () {
-      startGame(pendingPlayerCount, pendingBotMode, pendingColors);
+    document.getElementById("netHostBtn").addEventListener("click", function () {
+      colorPickPurpose = "host";
+      showColorPickScreen(1, false); // just the host picks a color here; friends pick theirs when they join
     });
+    document.getElementById("colorStartBtn").addEventListener("click", function () {
+      if (colorPickPurpose === "host") {
+        hostCreateLobby();
+      } else {
+        startGame(pendingPlayerCount, pendingBotMode, pendingColors);
+      }
+    });
+    document.getElementById("lobbyStartBtn").addEventListener("click", hostStartNetworkedGame);
     document.getElementById("playAgainBtn").addEventListener("click", function () {
-      startGame(pendingPlayerCount, pendingBotMode, pendingColors);
+      if (isNetHost) { hostStartNetworkedGame(); }
+      else { startGame(pendingPlayerCount, pendingBotMode, pendingColors); }
     });
 
+    document.getElementById("joinNetBtn").addEventListener("click", joinShowCodeEntry);
+    document.getElementById("joinCodeGoBtn").addEventListener("click", joinShowColorPick);
+    document.getElementById("joinerJoinBtn").addEventListener("click", joinerConnect);
+    bindJoinerHold("joinerLeftBtn", function (v) { netJoinerLeft = v; });
+    bindJoinerHold("joinerRightBtn", function (v) { netJoinerRight = v; });
+    bindJoinerHold("joinerFireBtn", function (v) { netJoinerFire = v; });
+
     document.getElementById("secretTestBtn").addEventListener("click", function () {
+      isNetHost = false; isNetJoiner = false;
       pendingPlayerCount = 2; pendingBotMode = true;
       pendingColors = [COLOR_PALETTE[0].hex, BOT_COLOR];
       startGame(2, true, pendingColors);
