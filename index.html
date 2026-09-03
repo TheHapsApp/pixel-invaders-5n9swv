@@ -29,7 +29,7 @@
     #statBar {
       display: flex;
       justify-content: space-between;
-      max-width: 520px;
+      max-width: 900px;
       margin: 0 auto 10px;
       font-weight: bold;
       font-size: clamp(0.9rem, 3.4vw, 1.1rem);
@@ -40,7 +40,7 @@
       display: flex;
       justify-content: center;
       gap: 8px;
-      max-width: 520px;
+      max-width: 900px;
       margin: 0 auto 12px;
       flex-wrap: wrap;
     }
@@ -60,7 +60,7 @@
 
     #gameWrap {
       position: relative;
-      max-width: 520px;
+      max-width: 900px;
       margin: 0 auto;
     }
     #game {
@@ -148,7 +148,7 @@
   </div>
 
   <div id="gameWrap">
-    <canvas id="game" width="520" height="750"></canvas>
+    <canvas id="game" width="900" height="750"></canvas>
     <div id="overlayMsg">
       <div class="big" id="overlayBig">👾 Pixel Invaders!</div>
       <div class="small" id="overlaySmall">Bigger invaders break into smaller ones when you shoot them. Don't let them reach the bottom!</div>
@@ -158,7 +158,7 @@
   </div>
 
   <script>
-    var CANVAS_W = 520, CANVAS_H = 750;
+    var CANVAS_W = 900, CANVAS_H = 750;
     var PLAYER_CELL = 5;
     var PLAYER_SPRITE = [
       "00011000",
@@ -172,7 +172,7 @@
     ];
     var PLAYER_W = 8 * PLAYER_CELL, PLAYER_H = 8 * PLAYER_CELL;
     var PLAYER_Y = CANVAS_H - 60;
-    var PLAYER_SPEED = 5.6;
+    var PLAYER_SPEED = 9;
 
     var SPRITES = [
       ["00100100","00111100","01111110","11011011","11111111","00100100","01011010","10100101"],
@@ -211,8 +211,8 @@
     var formationSpeed = 1.1;
     var formationDropStep = 20;
 
-    var MAX_ALIVE = 22;
-    var spawnTimer = 60;
+    var MAX_ALIVE = 34;
+    var spawnTimer = 30;
 
     var BALL_RADIUS = 13;
     var ball = null;
@@ -407,7 +407,7 @@
       powerupTimer = 0;
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
       for (var s0 = 0; s0 < 7; s0++) spawnOneInvader();
-      spawnTimer = 60;
+      spawnTimer = 30;
       updateStatBar();
       updateItemTimers();
       hideOverlay();
@@ -823,7 +823,7 @@
       spawnTimer--;
       if (spawnTimer <= 0 && invaders.length < MAX_ALIVE) {
         spawnOneInvader();
-        spawnTimer = 40 + Math.random() * 60;
+        spawnTimer = 18 + Math.random() * 30;
         updateStatBar();
       }
 
