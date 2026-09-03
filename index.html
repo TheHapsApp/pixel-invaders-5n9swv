@@ -200,6 +200,48 @@
       font-size: 2rem;
       text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
     }
+    #chatLog {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      max-width: 260px;
+      text-align: left;
+      font-size: 0.85rem;
+      font-weight: bold;
+      pointer-events: none;
+      z-index: 20;
+      text-shadow: 1px 1px 0 rgba(0,0,0,0.6);
+    }
+    #chatLog div { margin-bottom: 3px; }
+
+    #chatBox, #joinerChatBox {
+      display: none;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      background: rgba(10, 5, 30, 0.92);
+      border: 4px solid #fff;
+      border-radius: 18px;
+      padding: 16px;
+      z-index: 60;
+    }
+    #chatInput, #joinerChatInput, .nicknameInput {
+      font-family: inherit;
+      font-size: 1.1rem;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 3px solid #fff;
+      width: 220px;
+      text-align: center;
+    }
+    .chatBtn { background: rgba(255,255,255,0.25) !important; }
+
+    .colorRow .nicknameInput { margin-top: 6px; width: 160px; font-size: 0.95rem; }
+
     #joinCodeInput, #peopleCountInput {
       font-family: inherit;
       font-size: 1.5rem;
@@ -341,6 +383,8 @@
       <div id="joinerColorPick" style="display:none;">
         <div class="small">Pick your color!</div>
         <div id="joinerSwatchRow" class="swatchRow"></div>
+        <div class="small">What's your nickname?</div>
+        <input type="text" id="joinerNicknameInput" maxlength="12" placeholder="Nickname">
         <button class="btn" id="joinerJoinBtn">🙋 Join!</button>
       </div>
       <div id="joinerWaiting" style="display:none;">
@@ -358,6 +402,12 @@
       <button class="btn" id="playAgainBtn" style="display:none;">🔄 Play Again</button>
     </div>
     <div id="megaMsg">🌈 ULTIMATE BOMB!<br>All Clear!</div>
+    <div id="chatLog"></div>
+    <div id="chatBox" style="display:none;">
+      <input type="text" id="chatInput" maxlength="60" placeholder="Say something nice!">
+      <button class="btn small" id="chatSendBtn">Send</button>
+      <button class="btn small" id="chatCancelBtn">Cancel</button>
+    </div>
   </div>
 
   <div id="controls"></div>
@@ -369,6 +419,12 @@
       <button class="ctrlBtn" id="joinerLeftBtn">◀</button>
       <button class="ctrlBtn fireBtn" id="joinerFireBtn">🔥</button>
       <button class="ctrlBtn" id="joinerRightBtn">▶</button>
+    </div>
+    <button class="btn small" id="joinerChatBtn" style="display:none;">💬 Type in the Chat</button>
+    <div id="joinerChatBox" style="display:none;">
+      <input type="text" id="joinerChatInput" maxlength="60" placeholder="Say something nice!">
+      <button class="btn small" id="joinerChatSendBtn">Send</button>
+      <button class="btn small" id="joinerChatCancelBtn">Cancel</button>
     </div>
   </div>
 
@@ -637,16 +693,31 @@
     }
 
     var pendingColors = [];
+    var pendingNicknames = [];
     var pendingPlayerCount = 1;
     var pendingBotMode = false;
     var colorPickPurpose = "start"; // "start" = begin the game now, "host" = create a network lobby instead
+
+    var netJoinerNickname = "";
+    var activeChatterIndex = -1; // which local player is composing a chat message
+    var BAD_WORDS = [
+      "damn", "hell", "crap", "stupid", "idiot", "dumb", "shut up", "sucks",
+      "fuck", "shit", "bitch", "ass", "bastard", "piss", "dick", "cock",
+      "nigger", "nigga", "fag", "retard", "whore", "slut", "kill yourself", "kys"
+    ];
+    function isMessageRude(text) {
+      var lower = " " + text.toLowerCase() + " ";
+      return BAD_WORDS.some(function (w) { return lower.indexOf(w) !== -1; });
+    }
     function showColorPickScreen(count, botMode) {
       pendingPlayerCount = count;
       pendingBotMode = botMode;
       pendingColors = new Array(count);
+      pendingNicknames = new Array(count);
       for (var pi = 0; pi < count; pi++) {
         var isBot = botMode && pi === count - 1;
         pendingColors[pi] = isBot ? BOT_COLOR : COLOR_PALETTE[pi % COLOR_PALETTE.length].hex;
+        pendingNicknames[pi] = isBot ? "Computer" : "";
       }
 
       var rowsEl = document.getElementById("colorPickRows");
@@ -676,6 +747,16 @@
               swatchRow.appendChild(sw);
             });
             row.appendChild(swatchRow);
+
+            var nickInput = document.createElement("input");
+            nickInput.type = "text";
+            nickInput.className = "nicknameInput";
+            nickInput.maxLength = 12;
+            nickInput.placeholder = "Nickname";
+            nickInput.addEventListener("input", function () {
+              pendingNicknames[idx] = nickInput.value;
+            });
+            row.appendChild(nickInput);
           }
           rowsEl.appendChild(row);
         })(i);
@@ -707,9 +788,53 @@
 
     function announceElimination(pl) {
       var remaining = players.filter(function (p) { return !p.destroyed; }).length;
-      var label = "Player " + pl.num + (pl.isBot ? " (Computer)" : "") + " is out!";
+      var name = pl.nickname || ("Player " + pl.num);
+      var label = name + (pl.isBot ? " (Computer)" : "") + " is out!";
       var remText = remaining === 1 ? "1 remaining" : remaining + " remaining";
       showBigMessage(label + "<br>" + remText, 1800);
+    }
+
+    // ---- chat: a player can type a short message; while composing they're frozen
+    // and untouchable, and the message gets checked before it's shown to anyone ----
+    function showChatLogMessage(text, color) {
+      var log = document.getElementById("chatLog");
+      var line = document.createElement("div");
+      line.textContent = text;
+      line.style.color = color || "#fff";
+      log.appendChild(line);
+      while (log.children.length > 5) log.removeChild(log.firstChild);
+      setTimeout(function () { if (line.parentNode) line.parentNode.removeChild(line); }, 6000);
+    }
+
+    function openChatFor(playerIndex) {
+      if (!players[playerIndex] || players[playerIndex].chatting) return;
+      activeChatterIndex = playerIndex;
+      players[playerIndex].chatting = true;
+      document.getElementById("chatInput").value = "";
+      document.getElementById("chatBox").style.display = "flex";
+    }
+
+    function closeChatBox() {
+      if (activeChatterIndex >= 0 && players[activeChatterIndex]) players[activeChatterIndex].chatting = false;
+      activeChatterIndex = -1;
+      document.getElementById("chatBox").style.display = "none";
+    }
+
+    function submitChat() {
+      var text = document.getElementById("chatInput").value.trim();
+      var pl = players[activeChatterIndex];
+      if (!text || !pl) { closeChatBox(); return; }
+      if (isMessageRude(text)) {
+        showChatLogMessage("💛 Let's keep it kind!", "#ffd23f");
+        closeChatBox();
+        return;
+      }
+      var label = pl.nickname || ("Player " + pl.num);
+      showChatLogMessage(label + ": " + text, pl.color);
+      if (isNetHost && netChannel) {
+        netChannel.send({ type: "broadcast", event: "chat", payload: { label: label, text: text, color: pl.color } });
+      }
+      closeChatBox();
     }
 
     // ---- different-device play: host side ----
@@ -724,19 +849,26 @@
       netChannel.on("broadcast", { event: "join" }, function (msg) {
         var p = msg.payload;
         var existing = netRoster.filter(function (r) { return r.tempId === p.tempId; })[0];
-        if (existing) existing.color = p.color;
-        else netRoster.push({ tempId: p.tempId, color: p.color });
+        if (existing) { existing.color = p.color; existing.nickname = p.nickname; }
+        else netRoster.push({ tempId: p.tempId, color: p.color, nickname: p.nickname });
         renderLobbyRoster();
         netChannel.send({ type: "broadcast", event: "ack", payload: { tempId: p.tempId } });
       });
       netChannel.on("broadcast", { event: "input" }, function (msg) {
         var p = msg.payload;
         var pl = players.filter(function (pp) { return pp.netId === p.tempId; })[0];
-        if (pl && !pl.destroyed) {
+        if (pl) {
           pl.keys["ArrowLeft"] = !!p.left;
           pl.keys["ArrowRight"] = !!p.right;
           pl.keys["s"] = !!p.fire;
         }
+      });
+      netChannel.on("broadcast", { event: "chatting" }, function (msg) {
+        var pl = players.filter(function (pp) { return pp.netId === msg.payload.tempId; })[0];
+        if (pl) pl.chatting = !!msg.payload.chatting;
+      });
+      netChannel.on("broadcast", { event: "chat" }, function (msg) {
+        showChatLogMessage(msg.payload.label + ": " + msg.payload.text, msg.payload.color);
       });
       netChannel.subscribe(function (status) {
         if (status === "SUBSCRIBED") {
@@ -751,8 +883,8 @@
     function renderLobbyRoster() {
       var el = document.getElementById("lobbyRoster");
       if (netRoster.length === 0) { el.textContent = "Nobody has joined yet."; return; }
-      el.innerHTML = netRoster.map(function (r, i) {
-        return '<span style="color:' + r.color + '">Player ' + (i + 2) + ' joined!</span>';
+      el.innerHTML = netRoster.map(function (r) {
+        return '<span style="color:' + r.color + '">' + (r.nickname || "A friend") + ' joined!</span>';
       }).join("<br>");
     }
 
@@ -760,7 +892,8 @@
       var count = 1 + netRoster.length;
       var colors = [pendingColors[0] || COLOR_PALETTE[0].hex].concat(netRoster.map(function (r) { return r.color; }));
       var netIds = [null].concat(netRoster.map(function (r) { return r.tempId; }));
-      startGame(count, false, colors, netIds);
+      var nicknames = [pendingNicknames[0] || ""].concat(netRoster.map(function (r) { return r.nickname || ""; }));
+      startGame(count, false, colors, netIds, nicknames);
       netChannel.send({ type: "broadcast", event: "start", payload: {} });
     }
 
@@ -817,6 +950,7 @@
       isNetJoiner = true;
       isNetHost = false;
       netMyTempId = "p" + Math.random().toString(36).slice(2, 8);
+      netJoinerNickname = document.getElementById("joinerNicknameInput").value.trim() || "Friend";
       netAckReceived = false;
       netJoinAttempts = 0;
       var client = getSupabaseClient();
@@ -851,6 +985,7 @@
         document.getElementById("joinerScreen").style.display = "flex";
         document.getElementById("joinerStatus").textContent = "You're in! ❤️❤️❤️";
         document.getElementById("joinerCtrlGroup").style.display = "flex";
+        document.getElementById("joinerChatBtn").style.display = "inline-block";
       });
 
       netChannel.subscribe(function (status) {
@@ -865,7 +1000,7 @@
     // the host might not exist yet (bad code, or they haven't created a lobby) -
     // keep knocking a few times, and if nobody ever answers, say so
     function sendJoinAttempt() {
-      netChannel.send({ type: "broadcast", event: "join", payload: { tempId: netMyTempId, color: netJoinerColor } });
+      netChannel.send({ type: "broadcast", event: "join", payload: { tempId: netMyTempId, color: netJoinerColor, nickname: netJoinerNickname } });
       netJoinAttempts++;
       if (netJoinAttempts >= 4) {
         if (!netAckReceived) showJoinNotFound();
@@ -897,6 +1032,42 @@
       el.addEventListener("pointercancel", function () { setFn(false); sendJoinerInput(); });
     }
 
+    function joinerOpenChat() {
+      if (!netChannel) return;
+      document.getElementById("joinerChatInput").value = "";
+      document.getElementById("joinerChatBox").style.display = "flex";
+      netChannel.send({ type: "broadcast", event: "chatting", payload: { tempId: netMyTempId, chatting: true } });
+    }
+
+    function joinerCloseChat(sentText) {
+      document.getElementById("joinerChatBox").style.display = "none";
+      if (netChannel) {
+        netChannel.send({ type: "broadcast", event: "chatting", payload: { tempId: netMyTempId, chatting: false } });
+      }
+      if (!sentText) return;
+      document.getElementById("joinerStatus").textContent = "✅ Sent!";
+    }
+
+    function joinerSubmitChat() {
+      var text = document.getElementById("joinerChatInput").value.trim();
+      if (!text) { joinerCloseChat(false); return; }
+      if (isMessageRude(text)) {
+        document.getElementById("joinerChatBox").style.display = "none";
+        if (netChannel) {
+          netChannel.send({ type: "broadcast", event: "chatting", payload: { tempId: netMyTempId, chatting: false } });
+        }
+        document.getElementById("joinerStatus").textContent = "💛 Let's keep it kind!";
+        return;
+      }
+      if (netChannel) {
+        netChannel.send({
+          type: "broadcast", event: "chat",
+          payload: { label: netJoinerNickname || "Friend", text: text, color: netJoinerColor }
+        });
+      }
+      joinerCloseChat(true);
+    }
+
     function randomTier() {
       var r = Math.random();
       if (r < 0.4) return 2;  // big, pink
@@ -918,11 +1089,12 @@
       return { tier: tier, kind: kind, x: x, y: y, w: size, h: size };
     }
 
-    function startGame(count, botMode, colors, netIds) {
+    function startGame(count, botMode, colors, netIds, nicknames) {
       if (count) playerCount = count;
       var useBotMode = !!botMode;
       var useColors = colors || pendingColors;
       var useNetIds = netIds || [];
+      var useNicknames = nicknames || pendingNicknames;
 
       var ctx = getAudioCtx();
       if (ctx.state === "suspended") ctx.resume();
@@ -961,12 +1133,14 @@
       for (var pi = 0; pi < playerCount; pi++) {
         var isBot = useBotMode && pi === playerCount - 1;
         var homeX = startX + pi * spacing;
+        var nick = (useNicknames && useNicknames[pi] && useNicknames[pi].trim()) || (isBot ? "Computer" : "");
         players.push({
           x: homeX, y: PLAYER_Y, homeX: homeX,
           keys: pi === 0 ? keys : {},
           fireCooldown: 0,
-          lives: 3, flash: 0, deathFlash: 0, destroyed: false,
+          lives: 3, flash: 0, deathFlash: 0, destroyed: false, chatting: false,
           color: (useColors && useColors[pi]) || (isBot ? BOT_COLOR : COLOR_PALETTE[pi % COLOR_PALETTE.length].hex),
+          nickname: nick,
           isBot: isBot,
           netId: useNetIds[pi] || null,
           num: pi + 1
@@ -1006,6 +1180,15 @@
         bindHoldButton(left, pl.keys, "ArrowLeft");
         bindHoldButton(right, pl.keys, "ArrowRight");
         bindHoldButton(fire, pl.keys, "s");
+
+        var chatBtn = document.createElement("button");
+        chatBtn.className = "btn small chatBtn";
+        chatBtn.textContent = "💬";
+        chatBtn.addEventListener("click", (function (playerIndex) {
+          return function () { openChatFor(playerIndex); };
+        })(pl.num - 1));
+        group.appendChild(chatBtn);
+
         wrap.appendChild(group);
       });
     }
@@ -1223,7 +1406,7 @@
       animTimer++;
       if (animTimer >= 18) { animTimer = 0; animFrame = 1 - animFrame; }
 
-      // every player: death sequence, or normal movement/shooting
+      // every player: death sequence, spectator mode, or normal movement/shooting
       players.forEach(function (pl) {
         if (pl.deathFlash > 0) {
           pl.deathFlash--;
@@ -1234,7 +1417,16 @@
           }
           return;
         }
-        if (pl.destroyed) return;
+        if (pl.destroyed) {
+          // spectator mode: can still move around and chat, but can't fight anymore
+          if (!pl.chatting) {
+            if (pl.keys["ArrowLeft"] || pl.keys["a"]) pl.x -= PLAYER_SPEED;
+            if (pl.keys["ArrowRight"] || pl.keys["d"]) pl.x += PLAYER_SPEED;
+            pl.x = Math.max(4, Math.min(CANVAS_W - PLAYER_W - 4, pl.x));
+          }
+          return;
+        }
+        if (pl.chatting) return; // frozen and untouchable while composing a chat message
         if (pl.isBot) runBotAI(pl);
         if (pl.flash > 0) pl.flash--;
         if (pl.keys["ArrowLeft"] || pl.keys["a"]) pl.x -= PLAYER_SPEED;
@@ -1442,7 +1634,7 @@
         }
         for (var pi2 = 0; pi2 < players.length; pi2++) {
           var pl2 = players[pi2];
-          if (!pl2.destroyed && pl2.deathFlash <= 0 && rectsOverlap(b, { x: pl2.x, y: pl2.y, w: PLAYER_W, h: PLAYER_H })) {
+          if (!pl2.destroyed && !pl2.chatting && pl2.deathFlash <= 0 && rectsOverlap(b, { x: pl2.x, y: pl2.y, w: PLAYER_W, h: PLAYER_H })) {
             spawnParticles(b.x + b.w / 2, b.y + b.h / 2, "#ff8f3f");
             pl2.flash = 20;
             loseLifeFor(pl2);
@@ -1495,6 +1687,23 @@
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 3;
       ctx.stroke();
+    }
+
+    function drawNameTag(pl) {
+      var text = pl.chatting ? "chatting" : (pl.nickname || ("Player " + pl.num));
+      var cx = pl.x + PLAYER_W / 2;
+      var y = pl.y - 12;
+      ctx.font = "bold 13px 'Comic Sans MS', sans-serif";
+      var w = Math.max(50, ctx.measureText(text).width + 16);
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(cx - w / 2, y - 18, w, 20);
+      ctx.strokeStyle = pl.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cx - w / 2, y - 18, w, 20);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.fillText(text, cx, y - 4);
+      ctx.textAlign = "left";
     }
 
     function draw() {
@@ -1592,11 +1801,21 @@
 
       // player ships - plain arrows in their chosen color, flash white on a hit and red fast right before destroyed
       players.forEach(function (pl) {
-        if (pl.destroyed) return;
+        if (pl.deathFlash > 0) {
+          var flashColor = Math.floor(pl.deathFlash / 2) % 2 === 0 ? "#ff3b3b" : pl.color;
+          drawShip(pl, flashColor);
+          return;
+        }
+        if (pl.destroyed) {
+          // spectator: a ghost triangle, white outline, black inside - can't be touched anymore
+          drawShip(pl, "#000");
+          drawNameTag(pl);
+          return;
+        }
         var shipColor = powerupTimer > 0 ? "#ff8f3f" : pl.color;
         if (pl.flash > 0 && Math.floor(pl.flash / 4) % 2 === 0) shipColor = "#fff";
-        if (pl.deathFlash > 0 && Math.floor(pl.deathFlash / 2) % 2 === 0) shipColor = "#ff3b3b";
         drawShip(pl, shipColor);
+        drawNameTag(pl);
       });
 
       // charged mini-beam preview, sitting on the tip of the first ship until you fire
@@ -1768,11 +1987,18 @@
     bindJoinerHold("joinerRightBtn", function (v) { netJoinerRight = v; });
     bindJoinerHold("joinerFireBtn", function (v) { netJoinerFire = v; });
 
+    document.getElementById("chatSendBtn").addEventListener("click", submitChat);
+    document.getElementById("chatCancelBtn").addEventListener("click", closeChatBox);
+    document.getElementById("joinerChatBtn").addEventListener("click", joinerOpenChat);
+    document.getElementById("joinerChatSendBtn").addEventListener("click", joinerSubmitChat);
+    document.getElementById("joinerChatCancelBtn").addEventListener("click", function () { joinerCloseChat(false); });
+
     document.getElementById("secretTestBtn").addEventListener("click", function () {
       isNetHost = false; isNetJoiner = false;
       pendingPlayerCount = 2; pendingBotMode = true;
       pendingColors = [COLOR_PALETTE[0].hex, BOT_COLOR];
-      startGame(2, true, pendingColors);
+      pendingNicknames = ["Tester", "Computer"];
+      startGame(2, true, pendingColors, null, pendingNicknames);
     });
 
     updateStatBar();
