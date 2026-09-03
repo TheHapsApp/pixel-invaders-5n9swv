@@ -71,6 +71,8 @@
       border: 5px solid #fff;
       box-shadow: 0 8px 0 rgba(0,0,0,0.3);
       background: #05041a;
+      touch-action: none;
+      cursor: crosshair;
     }
     #overlayMsg {
       display: flex;
@@ -130,11 +132,11 @@
 </head>
 <body>
   <h1>👾 Pixel Invaders!</h1>
-  <p class="sub">← → or A/D to move · S to shoot · big ones split when you hit them!</p>
+  <p class="sub">← → or A/D to move · S to shoot · aim with your mouse and click to snipe!</p>
 
   <div id="statBar">
     <span id="scoreLbl">Score: 0</span>
-    <span id="waveLbl">Wave 1</span>
+    <span id="aliveLbl">Invaders: 0</span>
     <span id="livesLbl">❤️❤️❤️</span>
   </div>
 
@@ -152,7 +154,7 @@
       <div class="small" id="overlaySmall">Bigger invaders break into smaller ones when you shoot them. Don't let them reach the bottom!</div>
       <button class="btn" id="startBtn">▶️ Start Game</button>
     </div>
-    <div id="megaMsg">🌈 ULTIMATE BOMB!<br>Wave Cleared!</div>
+    <div id="megaMsg">🌈 ULTIMATE BOMB!<br>All Clear!</div>
   </div>
 
   <script>
@@ -197,6 +199,7 @@
 
     var player = { x: CANVAS_W / 2 - PLAYER_W / 2, y: PLAYER_Y };
     var keys = {};
+    var mouse = { x: CANVAS_W / 2, y: CANVAS_H / 2, active: false };
     var playerBullets = [];
     var FIRE_COOLDOWN_FRAMES = 8;
     var fireCooldown = 0;
@@ -205,8 +208,11 @@
     var particles = [];
 
     var formationDir = 1;
-    var formationSpeed = 1.6;
+    var formationSpeed = 1.1;
     var formationDropStep = 20;
+
+    var MAX_ALIVE = 22;
+    var spawnTimer = 60;
 
     var BALL_RADIUS = 13;
     var ball = null;
@@ -249,7 +255,7 @@
     var SWEEP_THICKNESS = 18;
     var SWEEP_SPEED = 9;
 
-    var score = 0, lives = 3, wave = 1;
+    var score = 0, lives = 3;
     var state = "idle"; // idle | playing | gameover
     var loopStarted = false;
 
@@ -310,7 +316,7 @@
 
     function updateStatBar() {
       document.getElementById("scoreLbl").textContent = "Score: " + score;
-      document.getElementById("waveLbl").textContent = "Wave " + wave;
+      document.getElementById("aliveLbl").textContent = "Invaders: " + invaders.length;
       document.getElementById("livesLbl").textContent = "❤️".repeat(Math.max(0, lives));
     }
 
@@ -357,19 +363,12 @@
       return 0;               // small, green
     }
 
-    function spawnWave(n) {
-      invaders = [];
-      var rows = Math.min(3 + Math.floor((n - 1) / 1), 5);
-      var cols = 6;
-      var startX = 50, startY = 75, gapX = 65, gapY = 58;
-      for (var r = 0; r < rows; r++) {
-        for (var c = 0; c < cols; c++) {
-          invaders.push(makeInvader(randomTier(), startX + c * gapX, startY + r * gapY, Math.floor(Math.random() * SPRITES.length)));
-        }
-      }
-      formationDir = 1;
-      formationSpeed = 1.6 + (n - 1) * 0.3;
-      formationDropStep = 20 + (n - 1) * 2;
+    function spawnOneInvader() {
+      var tier = randomTier();
+      var w = 8 * TIERS[tier].cell;
+      var x = 20 + Math.random() * (CANVAS_W - 40 - w);
+      var y = 50 + Math.random() * 40;
+      invaders.push(makeInvader(tier, x, y, Math.floor(Math.random() * SPRITES.length)));
     }
 
     function makeInvader(tier, x, y, kind) {
@@ -382,11 +381,13 @@
       var ctx = getAudioCtx();
       if (ctx.state === "suspended") ctx.resume();
 
-      score = 0; lives = 3; wave = 1;
+      score = 0; lives = 3;
       playerBullets = [];
       fireCooldown = 0;
       enemyBullets = [];
       particles = [];
+      invaders = [];
+      formationDir = 1;
       ball = null;
       ballTimer = ITEM_SPAWN_INTERVAL;
       ballDelay = 60;
@@ -405,7 +406,8 @@
       trailParticles = [];
       powerupTimer = 0;
       player.x = CANVAS_W / 2 - PLAYER_W / 2;
-      spawnWave(wave);
+      for (var s0 = 0; s0 < 7; s0++) spawnOneInvader();
+      spawnTimer = 60;
       updateStatBar();
       updateItemTimers();
       hideOverlay();
@@ -462,7 +464,7 @@
       if (state !== "playing") return;
       if (enemyBullets.length >= 4) return;
       if (invaders.length === 0) return;
-      var chance = 0.01 + wave * 0.0015;
+      var chance = 0.003 + invaders.length * 0.0007;
       if (Math.random() < chance) {
         var inv = invaders[Math.floor(Math.random() * invaders.length)];
         enemyBullets.push({ x: inv.x + inv.w / 2 - 2.5, y: inv.y + inv.h, w: 5, h: 15 });
@@ -676,7 +678,7 @@
         }
       }
 
-      // rare rainbow ball: leaves a fading trail, clears the wave when shot
+      // rare rainbow ball: leaves a fading trail, clears every invader on screen when shot
       if (!rainbowBall) {
         if (rainbowDelay > 0) {
           rainbowDelay--;
@@ -817,10 +819,11 @@
         if (p.life <= 0) particles.splice(i, 1);
       }
 
-      // wave clear
-      if (invaders.length === 0) {
-        wave++;
-        spawnWave(wave);
+      // invaders trickle in continuously instead of arriving in waves
+      spawnTimer--;
+      if (spawnTimer <= 0 && invaders.length < MAX_ALIVE) {
+        spawnOneInvader();
+        spawnTimer = 40 + Math.random() * 60;
         updateStatBar();
       }
 
@@ -964,6 +967,26 @@
         ctx.fillRect(p.x, p.y, 3, 3);
         ctx.globalAlpha = 1;
       });
+
+      // aim reticle - follows the mouse, click an invader to snipe it
+      if (mouse.active && state === "playing") {
+        var r = 22;
+        ctx.strokeStyle = "#ff5f5f";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(mouse.x, mouse.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(function (d) {
+          ctx.beginPath();
+          ctx.moveTo(mouse.x + d[0] * (r + 4), mouse.y + d[1] * (r + 4));
+          ctx.lineTo(mouse.x + d[0] * (r + 12), mouse.y + d[1] * (r + 12));
+          ctx.stroke();
+        });
+        ctx.fillStyle = "#ff5f5f";
+        ctx.beginPath();
+        ctx.arc(mouse.x, mouse.y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     function loop() {
@@ -981,6 +1004,35 @@
     document.addEventListener("keyup", function (e) {
       var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       keys[k] = false;
+    });
+
+    function canvasPoint(evt) {
+      var rect = canvas.getBoundingClientRect();
+      var scaleX = CANVAS_W / rect.width;
+      var scaleY = CANVAS_H / rect.height;
+      return { x: (evt.clientX - rect.left) * scaleX, y: (evt.clientY - rect.top) * scaleY };
+    }
+
+    canvas.addEventListener("pointermove", function (e) {
+      var pt = canvasPoint(e);
+      mouse.x = pt.x; mouse.y = pt.y; mouse.active = true;
+    });
+    canvas.addEventListener("pointerleave", function () { mouse.active = false; });
+
+    canvas.addEventListener("pointerdown", function (e) {
+      if (state !== "playing") return;
+      var pt = canvasPoint(e);
+      mouse.x = pt.x; mouse.y = pt.y; mouse.active = true;
+      if (fireCooldown > 0) return;
+      fireCooldown = FIRE_COOLDOWN_FRAMES;
+      playShootSound();
+      for (var k = invaders.length - 1; k >= 0; k--) {
+        var inv = invaders[k];
+        if (!(inv.spawnGrace > 0) && pt.x >= inv.x && pt.x <= inv.x + inv.w && pt.y >= inv.y && pt.y <= inv.y + inv.h) {
+          killInvaderToMini(inv, k);
+          break;
+        }
+      }
     });
 
     document.getElementById("startBtn").addEventListener("click", startGame);
